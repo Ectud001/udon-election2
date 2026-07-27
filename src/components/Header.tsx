@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useElection } from '../context/ElectionContext';
 import { ViewMode } from '../types';
-import { EctLogo } from './EctLogo';
 import {
   BarChart3,
   Edit3,
@@ -35,16 +34,11 @@ export const Header: React.FC = () => {
     <>
       <header className="sticky top-0 z-40 shadow-md shadow-emerald-950/20 bg-[#2d8a68] text-white border-b border-[#237054]">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-2">
-        {/* Logo & Title */}
+        {/* Title */}
         <div className="flex items-center space-x-3 shrink-0">
-          <div className="relative group flex items-center justify-center p-0.5 rounded-full bg-amber-300 shadow-md shadow-amber-500/20">
-            <div className="bg-white rounded-full p-1 flex items-center justify-center shadow-inner">
-              <EctLogo size={38} className="w-9 h-9" />
-            </div>
-          </div>
-          <div className="hidden min-[380px]:block">
+          <div>
             <div className="flex items-center space-x-2">
-              <h1 className="font-extrabold text-sm sm:text-base tracking-tight text-white leading-tight truncate max-w-[190px] sm:max-w-xs drop-shadow-xs">
+              <h1 className="font-extrabold text-sm sm:text-base tracking-tight text-white leading-tight truncate max-w-[220px] sm:max-w-xs drop-shadow-xs">
                 {electionTitle}
               </h1>
               <span className="bg-red-500/30 border border-red-400/50 text-red-100 text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center space-x-1 animate-pulse shrink-0">
@@ -52,14 +46,15 @@ export const Header: React.FC = () => {
                 <span>LIVE</span>
               </span>
             </div>
-            <p className="text-[11px] text-emerald-100/90 font-medium truncate max-w-[260px]">
+            <p className="text-[11px] text-emerald-100/90 font-medium truncate max-w-[280px]">
               สำนักงานคณะกรรมการการเลือกตั้งประจำจังหวัดอุดรธานี
             </p>
           </div>
         </div>
 
-        {/* View Mode Tabs (Desktop & Tablet) */}
+        {/* View Mode Tabs (Role-Based Visibility) */}
         <nav className="flex items-center bg-[#1e5d46] p-1 rounded-xl border border-[#184d3a] text-xs sm:text-sm font-medium shadow-inner">
+          {/* Always visible: Dashboard */}
           <button
             onClick={() => setViewMode('public')}
             className={`flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${
@@ -72,30 +67,36 @@ export const Header: React.FC = () => {
             <span>Dashboard สรุปผล</span>
           </button>
 
-          <button
-            onClick={() => setViewMode('vote')}
-            className={`flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${
-              viewMode === 'vote'
-                ? 'bg-amber-400 text-slate-950 font-extrabold shadow-md shadow-amber-400/20'
-                : 'text-emerald-100 hover:text-white hover:bg-[#28795b]'
-            }`}
-          >
-            <Edit3 className="w-4 h-4" />
-            <span>กรอกคะแนน</span>
-          </button>
+          {/* Visible in Vote mode or Admin mode */}
+          {(viewMode === 'vote' || viewMode === 'admin') && (
+            <button
+              onClick={() => setViewMode('vote')}
+              className={`flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${
+                viewMode === 'vote'
+                  ? 'bg-amber-400 text-slate-950 font-extrabold shadow-md shadow-amber-400/20'
+                  : 'text-emerald-100 hover:text-white hover:bg-[#28795b]'
+              }`}
+            >
+              <Edit3 className="w-4 h-4" />
+              <span>กรอกคะแนน</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setViewMode('admin')}
-            className={`flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${
-              viewMode === 'admin'
-                ? 'bg-[#154333] text-amber-300 font-bold border border-[#2a7a5d] shadow-sm'
-                : 'text-emerald-100 hover:text-white hover:bg-[#28795b]'
-            }`}
-          >
-            <Settings className="w-4 h-4" />
-            <span className="hidden md:inline">ตั้งค่าแอดมิน</span>
-            <span className="md:hidden">แอดมิน</span>
-          </button>
+          {/* Visible ONLY in Admin mode */}
+          {viewMode === 'admin' && (
+            <button
+              onClick={() => setViewMode('admin')}
+              className={`flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${
+                viewMode === 'admin'
+                  ? 'bg-[#154333] text-amber-300 font-bold border border-[#2a7a5d] shadow-sm'
+                  : 'text-emerald-100 hover:text-white hover:bg-[#28795b]'
+              }`}
+            >
+              <Settings className="w-4 h-4" />
+              <span className="hidden md:inline">ตั้งค่าแอดมิน</span>
+              <span className="md:hidden">แอดมิน</span>
+            </button>
+          )}
         </nav>
 
         {/* Right Action buttons */}

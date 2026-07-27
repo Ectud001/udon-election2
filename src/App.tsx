@@ -5,7 +5,6 @@ import { LiveAlertToast } from './components/LiveAlertToast';
 import { PublicDashboard } from './components/PublicDashboard';
 import { VoteEntryPage } from './components/VoteEntryPage';
 import { AdminSettingsPage } from './components/AdminSettingsPage';
-import { EctLogo } from './components/EctLogo';
 import { ShieldCheck, Globe, Phone, Building2, ExternalLink } from 'lucide-react';
 
 const MainContent: React.FC = () => {
@@ -33,7 +32,6 @@ const MainContent: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pb-6 border-b border-[#28795b]/60 items-center">
             {/* Left Col: Office Info */}
             <div className="flex items-center space-x-3">
-              <EctLogo size={44} className="w-11 h-11 shrink-0" />
               <div>
                 <h4 className="font-extrabold text-sm text-white flex items-center gap-1.5">
                   <span>สำนักงานคณะกรรมการการเลือกตั้งประจำจังหวัดอุดรธานี</span>
