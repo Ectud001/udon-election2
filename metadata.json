@@ -1,0 +1,6 @@
+{
+  "name": "ระบบนับคะแนนเลือกตั้งเรียลไทม์",
+  "description": "ระบบนับคะแนนเลือกตั้งเรียลไทม์ พร้อมสรุปผลด้วยกราฟ รูปผู้สมัคร แยกอำเภอ เขต หน่วยเลือกตั้ง และหน้ากรอกคะแนนสำหรับเจ้าหน้าที่",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
