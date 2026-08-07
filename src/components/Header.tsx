@@ -35,10 +35,10 @@ export const Header: React.FC = () => {
       <header className="sticky top-0 z-40 shadow-md shadow-emerald-950/20 bg-[#2d8a68] text-white border-b border-[#237054]">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-2">
         {/* Title */}
-        <div className="flex items-center space-x-3 shrink-0">
-          <div>
-            <div className="flex items-center space-x-2">
-              <h1 className="font-extrabold text-sm sm:text-base tracking-tight text-white leading-tight truncate max-w-[220px] sm:max-w-xs drop-shadow-xs">
+        <div className="flex items-center space-x-3 min-w-0 flex-1">
+          <div className="min-w-0">
+            <div className="flex items-center space-x-2 flex-wrap sm:flex-nowrap">
+              <h1 className="font-extrabold text-sm sm:text-base tracking-tight text-white leading-tight break-words max-w-xs sm:max-w-md lg:max-w-2xl drop-shadow-xs">
                 {electionTitle}
               </h1>
               <span className="bg-red-500/30 border border-red-400/50 text-red-100 text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center space-x-1 animate-pulse shrink-0">
@@ -46,7 +46,7 @@ export const Header: React.FC = () => {
                 <span>LIVE</span>
               </span>
             </div>
-            <p className="text-[11px] text-emerald-100/90 font-medium truncate max-w-[280px]">
+            <p className="text-[11px] text-emerald-100/90 font-medium truncate max-w-xs sm:max-w-md lg:max-w-xl">
               สำนักงานคณะกรรมการการเลือกตั้งประจำจังหวัดอุดรธานี
             </p>
           </div>

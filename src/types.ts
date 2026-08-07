@@ -21,11 +21,18 @@ export interface Candidate {
   zoneId?: string;
 }
 
+export interface SubDistrict {
+  id: string;
+  name: string; // e.g. "ตำบลหมากแข้ง", "ตำบลสุเทพ"
+  districtId: string;
+}
+
 export interface PollingStation {
   id: string;
-  name: string; // e.g. "หน่วยที่ 1 โรงเรียนบ้านแม่ริม"
+  name: string; // e.g. "หน่วยที่ 1"
   stationNumber: number;
   districtId: string;
+  subDistrictId?: string; // ตำบล
   zoneId: string;
   totalEligibleVoters: number;
   status: 'pending' | 'in_progress' | 'completed';

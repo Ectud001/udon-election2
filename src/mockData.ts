@@ -1,4 +1,4 @@
-import { District, Zone, PollingStation, Candidate, Party, PollingStationVote } from './types';
+import { District, Zone, PollingStation, Candidate, Party, PollingStationVote, SubDistrict } from './types';
 
 export const INITIAL_PARTIES: Party[] = [
   {
@@ -52,75 +52,93 @@ export const INITIAL_ZONES: Zone[] = [
   { id: 'z3', name: 'เขตเลือกตั้งที่ 3 (สารภี - หางดง)', zoneNumber: 3, districtId: 'd3' },
 ];
 
+export const INITIAL_SUB_DISTRICTS: SubDistrict[] = [
+  { id: 'sub1', name: 'ตำบลสุเทพ', districtId: 'd1' },
+  { id: 'sub2', name: 'ตำบลศรีภูมิ', districtId: 'd1' },
+  { id: 'sub3', name: 'ตำบลหมากแข้ง', districtId: 'd1' },
+  { id: 'sub4', name: 'ตำบลดอนแก้ว', districtId: 'd2' },
+  { id: 'sub5', name: 'ตำบลแม่ริม', districtId: 'd2' },
+  { id: 'sub6', name: 'ตำบลยางเนิ้ง', districtId: 'd3' },
+  { id: 'sub7', name: 'ตำบลหางดง', districtId: 'd4' },
+];
+
 export const INITIAL_POLLING_STATIONS: PollingStation[] = [
   {
     id: 's1',
-    name: 'หน่วยที่ 1 หอประชุมหอศิลป์ มช. (ต.สุเทพ)',
+    name: 'หน่วยที่ 1',
     stationNumber: 1,
     districtId: 'd1',
+    subDistrictId: 'sub1',
     zoneId: 'z1',
     totalEligibleVoters: 1250,
     status: 'in_progress',
   },
   {
     id: 's2',
-    name: 'หน่วยที่ 2 โรงเรียนยุพราชวิทยาลัย (ต.ศรีภูมิ)',
+    name: 'หน่วยที่ 2',
     stationNumber: 2,
     districtId: 'd1',
+    subDistrictId: 'sub2',
     zoneId: 'z1',
     totalEligibleVoters: 1100,
     status: 'in_progress',
   },
   {
     id: 's3',
-    name: 'หน่วยที่ 3 ศาลาอ่างแก้ว (ต.สุเทพ)',
+    name: 'หน่วยที่ 3',
     stationNumber: 3,
     districtId: 'd1',
+    subDistrictId: 'sub1',
     zoneId: 'z1',
     totalEligibleVoters: 980,
     status: 'completed',
   },
   {
     id: 's4',
-    name: 'หน่วยที่ 1 วัดป่าดอนแก้ว (ต.ดอนแก้ว อ.แม่ริม)',
+    name: 'หน่วยที่ 1',
     stationNumber: 1,
     districtId: 'd2',
+    subDistrictId: 'sub4',
     zoneId: 'z2',
     totalEligibleVoters: 1050,
     status: 'in_progress',
   },
   {
     id: 's5',
-    name: 'หน่วยที่ 2 อาคารเอนกประสงค์เทศบาลแม่ริม',
+    name: 'หน่วยที่ 2',
     stationNumber: 2,
     districtId: 'd2',
+    subDistrictId: 'sub5',
     zoneId: 'z2',
     totalEligibleVoters: 1300,
     status: 'in_progress',
   },
   {
     id: 's6',
-    name: 'หน่วยที่ 1 โรงเรียนสารภีพิทยาคม (ต.ยางเนิ้ง)',
+    name: 'หน่วยที่ 1',
     stationNumber: 1,
     districtId: 'd3',
+    subDistrictId: 'sub6',
     zoneId: 'z3',
     totalEligibleVoters: 1150,
     status: 'in_progress',
   },
   {
     id: 's7',
-    name: 'หน่วยที่ 2 วัดยางเนิ้ง (ต.ยางเนิ้ง อ.สารภี)',
+    name: 'หน่วยที่ 2',
     stationNumber: 2,
     districtId: 'd3',
+    subDistrictId: 'sub6',
     zoneId: 'z3',
     totalEligibleVoters: 890,
     status: 'pending',
   },
   {
     id: 's8',
-    name: 'หน่วยที่ 1 หอประชุมอำเภอหางดง (ต.หางดง)',
+    name: 'หน่วยที่ 1',
     stationNumber: 1,
     districtId: 'd4',
+    subDistrictId: 'sub7',
     zoneId: 'z3',
     totalEligibleVoters: 1400,
     status: 'in_progress',

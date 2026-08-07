@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useElection } from '../context/ElectionContext';
 import { Candidate, PollingStation, District, Zone } from '../types';
+import { downloadLocationExcelTemplate, parseLocationExcelFile, LocationExcelRow } from '../utils/excelUtils';
 import {
   Settings,
   Users,
@@ -17,6 +18,14 @@ import {
   Image as ImageIcon,
   Save,
   Sparkles,
+  FileSpreadsheet,
+  UploadCloud,
+  FileCheck,
+  AlertCircle,
+  X,
+  FileText,
+  CheckCircle2,
+  RefreshCw,
 } from 'lucide-react';
 
 const AVATAR_PRESETS = [
@@ -35,6 +44,7 @@ export const AdminSettingsPage: React.FC = () => {
     candidates,
     parties,
     districts,
+    subDistricts,
     zones,
     pollingStations,
     addCandidate,
@@ -47,15 +57,80 @@ export const AdminSettingsPage: React.FC = () => {
     updatePollingStation,
     deletePollingStation,
     addDistrict,
+    deleteDistrict,
+    addSubDistrict,
+    updateSubDistrict,
+    deleteSubDistrict,
     addZone,
+    deleteZone,
     toggleStationCompletion,
     toggleZoneCompletion,
     toggleDistrictCompletion,
     resetToDefaultData,
+    clearAllVotes,
+    clearAllData,
     votes,
+    importExcelLocationData,
+    deduplicatePollingStationsBySubDistrict,
   } = useElection();
 
+  const safeParties = Array.isArray(parties) ? parties : [];
+
+  // Active Tab State
   const [activeTab, setActiveTab] = useState<'candidates' | 'parties' | 'stations' | 'system'>('candidates');
+
+  // Station SubDistrict Filter State
+  const [stationSubFilter, setStationSubFilter] = useState<string>('all');
+
+  const handleRunDeduplication = () => {
+    const { removedCount } = deduplicatePollingStationsBySubDistrict();
+    if (removedCount > 0) {
+      showToast(`ทำความสะอาดสำเร็จ! ลบหน่วยเลือกตั้งซ้ำซ้อนออก ${removedCount} รายการ (ยึดตำบลเป็นหลัก)`);
+    } else {
+      showToast(`ไม่พบหน่วยเลือกตั้งซ้ำในระบบ ข้อมูลถูกต้องตามตำบลแล้ว`);
+    }
+  };
+
+  // Excel Import States
+  const excelFileInputRef = useRef<HTMLInputElement>(null);
+  const [excelRows, setExcelRows] = useState<LocationExcelRow[]>([]);
+  const [showExcelModal, setShowExcelModal] = useState<boolean>(false);
+  const [isParsingExcel, setIsParsingExcel] = useState<boolean>(false);
+  const [excelError, setExcelError] = useState<string | null>(null);
+
+  const handleLocationFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsParsingExcel(true);
+    setExcelError(null);
+
+    try {
+      const parsed = await parseLocationExcelFile(file);
+      if (!parsed || parsed.length === 0) {
+        setExcelError('ไม่พบข้อมูลหน่วยเลือกตั้งในไฟล์ Excel หรือรูปแบบคอลัมน์ไม่ถูกต้อง');
+      } else {
+        setExcelRows(parsed);
+        setShowExcelModal(true);
+      }
+    } catch (err: any) {
+      setExcelError(err?.message || 'เกิดข้อผิดพลาดในการอ่านไฟล์ Excel');
+    } finally {
+      setIsParsingExcel(false);
+      if (excelFileInputRef.current) excelFileInputRef.current.value = '';
+    }
+  };
+
+  const handleConfirmExcelImport = () => {
+    if (excelRows.length === 0) return;
+
+    const res = importExcelLocationData(excelRows);
+    setShowExcelModal(false);
+    setExcelRows([]);
+    showToast(
+      `นำเข้าสำเร็จ! สร้างอำเภอ ${res.createdDistricts} แห่ง, ตำบล ${res.createdSubDistricts} แห่ง, เขต ${res.createdZones} เขต, หน่วยเลือกตั้ง ${res.createdStations} หน่วย (${res.updatedStations} อัปเดต)`
+    );
+  };
 
   // Election Title Form State
   const [titleInput, setTitleInput] = useState<string>(electionTitle);
@@ -70,7 +145,7 @@ export const AdminSettingsPage: React.FC = () => {
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
   const [candNumber, setCandNumber] = useState<number>(candidates.length + 1);
   const [candName, setCandName] = useState<string>('');
-  const [candPartyId, setCandPartyId] = useState<string>(parties[0]?.id || 'p1');
+  const [candPartyId, setCandPartyId] = useState<string>(safeParties[0]?.id || 'p1');
   const [candPhotoUrl, setCandPhotoUrl] = useState<string>(AVATAR_PRESETS[0]);
   const [candBio, setCandBio] = useState<string>('');
 
@@ -79,13 +154,57 @@ export const AdminSettingsPage: React.FC = () => {
   const [stName, setStName] = useState<string>('');
   const [stNumber, setStNumber] = useState<number>(1);
   const [stDistrictId, setStDistrictId] = useState<string>(districts[0]?.id || '');
+  const [stSubDistrictId, setStSubDistrictId] = useState<string>(subDistricts[0]?.id || '');
   const [stZoneId, setStZoneId] = useState<string>(zones[0]?.id || '');
   const [stVoters, setStVoters] = useState<number>(1000);
 
-  // New District / Zone modal forms
+  // New District / SubDistrict / Zone modal forms
   const [newDistrictName, setNewDistrictName] = useState<string>('');
+  const [newSubDistrictName, setNewSubDistrictName] = useState<string>('');
+  const [newSubDistrictDistrictId, setNewSubDistrictDistrictId] = useState<string>(districts[0]?.id || '');
   const [newZoneName, setNewZoneName] = useState<string>('');
   const [newZoneDistrictId, setNewZoneDistrictId] = useState<string>(districts[0]?.id || '');
+
+  // Keep district dropdown selections synced to a valid existing district
+  useEffect(() => {
+    if (districts.length > 0) {
+      if (!newSubDistrictDistrictId || !districts.some((d) => d.id === newSubDistrictDistrictId)) {
+        setNewSubDistrictDistrictId(districts[0].id);
+      }
+      if (!newZoneDistrictId || !districts.some((d) => d.id === newZoneDistrictId)) {
+        setNewZoneDistrictId(districts[0].id);
+      }
+      if (!stDistrictId || !districts.some((d) => d.id === stDistrictId)) {
+        setStDistrictId(districts[0].id);
+      }
+    }
+  }, [districts, newSubDistrictDistrictId, newZoneDistrictId, stDistrictId]);
+
+  // Filter available subDistricts for station creation form with graceful fallback
+  const availableSubDistrictsForStationForm = useMemo(() => {
+    if (!subDistricts || subDistricts.length === 0) return [];
+    if (!stDistrictId) return subDistricts;
+
+    const matched = subDistricts.filter((sd) => !sd.districtId || sd.districtId === stDistrictId);
+    return matched.length > 0 ? matched : subDistricts;
+  }, [subDistricts, stDistrictId]);
+
+  // Confirmation Modal & Toast state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    actionText: string;
+    isDanger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
   // Handle Photo File Upload
   const handlePhotoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,7 +225,7 @@ export const AdminSettingsPage: React.FC = () => {
     e.preventDefault();
     if (!candName.trim()) return;
 
-    const selectedParty = parties.find((p) => p.id === candPartyId) || parties[0];
+    const selectedParty = safeParties.find((p) => p.id === candPartyId) || safeParties[0];
 
     if (editingCandidateId) {
       updateCandidate(editingCandidateId, {
@@ -151,24 +270,50 @@ export const AdminSettingsPage: React.FC = () => {
     e.preventDefault();
     if (!stName.trim()) return;
 
+    if (stSubDistrictId && stDistrictId) {
+      const sub = subDistricts.find((sd) => sd.id === stSubDistrictId);
+      if (sub && (!sub.districtId || sub.districtId !== stDistrictId)) {
+        updateSubDistrict(stSubDistrictId, { districtId: stDistrictId });
+      }
+    }
+
     if (editingStationId) {
       updatePollingStation(editingStationId, {
-        name: stName,
+        name: stName.trim(),
         stationNumber: stNumber,
         districtId: stDistrictId,
+        subDistrictId: stSubDistrictId,
         zoneId: stZoneId,
         totalEligibleVoters: stVoters,
       });
       setEditingStationId(null);
+      showToast(`อัปเดตข้อมูลหน่วยเลือกตั้ง "${stName}" เรียบร้อยแล้ว`);
     } else {
-      addPollingStation({
-        name: stName,
-        stationNumber: stNumber,
-        districtId: stDistrictId,
-        zoneId: stZoneId,
-        totalEligibleVoters: stVoters,
-        status: 'pending',
-      });
+      // Check if station already exists in this sub-district
+      const existingInSub = pollingStations.find(
+        (s) => s.subDistrictId === stSubDistrictId && s.name.trim() === stName.trim()
+      );
+
+      if (existingInSub) {
+        updatePollingStation(existingInSub.id, {
+          districtId: stDistrictId,
+          subDistrictId: stSubDistrictId,
+          zoneId: stZoneId,
+          totalEligibleVoters: stVoters,
+        });
+        showToast(`หน่วย "${stName.trim()}" มีอยู่แล้วในตำบลนี้ — อัปเดตข้อมูลผู้มีสิทธิเรียบร้อยแล้ว`);
+      } else {
+        addPollingStation({
+          name: stName.trim(),
+          stationNumber: stNumber,
+          districtId: stDistrictId,
+          subDistrictId: stSubDistrictId,
+          zoneId: stZoneId,
+          totalEligibleVoters: stVoters,
+          status: 'pending',
+        });
+        showToast(`เพิ่มหน่วยเลือกตั้ง "${stName.trim()}" เรียบร้อยแล้ว`);
+      }
     }
 
     setStName('');
@@ -212,7 +357,7 @@ export const AdminSettingsPage: React.FC = () => {
     e.preventDefault();
     if (titleInput.trim()) {
       updateElectionTitle(titleInput.trim());
-      alert('บันทึกหัวข้อการเลือกตั้งเรียบร้อยแล้ว!');
+      showToast('บันทึกหัวข้อการเลือกตั้งเรียบร้อยแล้ว!');
     }
   };
 
@@ -343,7 +488,7 @@ export const AdminSettingsPage: React.FC = () => {
                     onChange={(e) => setCandPartyId(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-orange-500"
                   >
-                    {parties.map((p) => (
+                    {safeParties.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name} ({p.shortName})
                       </option>
@@ -479,12 +624,21 @@ export const AdminSettingsPage: React.FC = () => {
                       <Edit2 className="w-4 h-4" />
                     </button>
                     <button
+                      type="button"
                       onClick={() => {
-                        if (confirm(`คุณต้องการลบผู้สมัคร "${candidate.name}" หรือไม่?`)) {
-                          deleteCandidate(candidate.id);
-                        }
+                        setConfirmModal({
+                          isOpen: true,
+                          title: 'ยืนยันการลบผู้สมัคร',
+                          message: `คุณต้องการลบผู้สมัคร "${candidate.name}" (หมายเลข ${candidate.number}) ออกจากระบบใช่หรือไม่?`,
+                          actionText: 'ลบผู้สมัคร',
+                          isDanger: true,
+                          onConfirm: () => {
+                            deleteCandidate(candidate.id);
+                            showToast(`ลบผู้สมัคร "${candidate.name}" เรียบร้อยแล้ว`);
+                          },
+                        });
                       }}
-                      className="p-2 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors"
+                      className="p-2 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
                       title="ลบ"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -597,11 +751,11 @@ export const AdminSettingsPage: React.FC = () => {
           {/* Party List */}
           <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-3">
             <h3 className="font-bold text-sm text-slate-900 border-b border-slate-100 pb-2">
-              พรรคการเมืองในระบบทั้งหมด ({parties.length} พรรค)
+              พรรคการเมืองในระบบทั้งหมด ({safeParties.length} พรรค)
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {parties.map((party) => {
+              {safeParties.map((party) => {
                 const partyCandidateCount = candidates.filter((c) => c.partyId === party.id).length;
 
                 return (
@@ -639,12 +793,21 @@ export const AdminSettingsPage: React.FC = () => {
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button
+                        type="button"
                         onClick={() => {
-                          if (confirm(`คุณต้องการลบพรรค "${party.name}" หรือไม่?`)) {
-                            deleteParty(party.id);
-                          }
+                          setConfirmModal({
+                            isOpen: true,
+                            title: 'ยืนยันการลบพรรคการเมือง',
+                            message: `คุณต้องการลบพรรค "${party.name}" (${party.shortName}) ออกจากระบบใช่หรือไม่?`,
+                            actionText: 'ลบพรรค',
+                            isDanger: true,
+                            onConfirm: () => {
+                              deleteParty(party.id);
+                              showToast(`ลบพรรค "${party.name}" เรียบร้อยแล้ว`);
+                            },
+                          });
                         }}
-                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors"
+                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
                         title="ลบพรรค"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -661,78 +824,387 @@ export const AdminSettingsPage: React.FC = () => {
       {/* TAB 3: LOCATIONS & POLLING STATIONS */}
       {activeTab === 'stations' && (
         <div className="space-y-6">
-          {/* Create District & Zone Quick Add Bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Add District */}
-            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-2">
-              <h4 className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
-                <Building2 className="w-4 h-4 text-indigo-600" />
-                <span>เพิ่มอำเภอใหม่</span>
-              </h4>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="ชื่ออำเภอ เช่น อำเภอฝาง"
-                  value={newDistrictName}
-                  onChange={(e) => setNewDistrictName(e.target.value)}
-                  className="flex-1 bg-slate-50 border border-slate-200 text-xs rounded-xl px-3 py-1.5 text-slate-900 focus:outline-none"
-                />
+          {/* Excel Import & Template Download Section (เมนูนำส่ง Excel) */}
+          <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 rounded-3xl p-6 text-white shadow-lg space-y-4 relative overflow-hidden">
+            <div className="absolute top-0 right-0 -mt-6 -mr-6 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-4">
+              <div className="space-y-1">
+                <div className="flex items-center space-x-2">
+                  <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-500/30 uppercase tracking-wider">
+                    Excel Batch Import
+                  </span>
+                  <span className="text-xs text-emerald-200/80 font-medium">ลำดับชั้น: เขตเลือกตั้ง &gt; อำเภอ &gt; ตำบล &gt; หน่วยเลือกตั้ง</span>
+                </div>
+                <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                  <FileSpreadsheet className="w-5 h-5 text-emerald-400" />
+                  <span>นำเข้าโครงสร้างหน่วยเลือกตั้งผ่านไฟล์ Excel (.xlsx)</span>
+                </h3>
+                <p className="text-xs text-slate-300">
+                  ออกแบบมาสำหรับการสร้าง/อัปเดตข้อมูล อำเภอ ตำบล หน่วยเลือกตั้ง และจำนวนผู้มีสิทธิเลือกตั้ง ครั้งละหลายหน่วย
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                {/* Download Template Button */}
                 <button
                   type="button"
-                  onClick={() => {
-                    if (newDistrictName.trim()) {
-                      addDistrict({ name: newDistrictName, code: 'D_' + Date.now() });
-                      setNewDistrictName('');
-                    }
-                  }}
-                  className="bg-indigo-600 text-white font-bold text-xs px-3 py-1.5 rounded-xl hover:bg-indigo-700"
+                  onClick={() => downloadLocationExcelTemplate()}
+                  className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-emerald-200 border border-emerald-400/30 rounded-xl text-xs font-bold flex items-center space-x-2 backdrop-blur-xs transition-all cursor-pointer shadow-xs active:scale-95"
                 >
-                  เพิ่มอำเภอ
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  <span>ดาวน์โหลด Template Excel</span>
                 </button>
+
+                {/* File Upload Button */}
+                <button
+                  type="button"
+                  disabled={isParsingExcel}
+                  onClick={() => excelFileInputRef.current?.click()}
+                  className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-extrabold flex items-center space-x-2 shadow-md transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  {isParsingExcel ? (
+                    <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                  ) : (
+                    <UploadCloud className="w-4 h-4 text-slate-950" />
+                  )}
+                  <span>{isParsingExcel ? 'กำลังอ่านไฟล์...' : 'เลือกไฟล์ Excel เพื่อนำเข้า'}</span>
+                </button>
+
+                <input
+                  ref={excelFileInputRef}
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleLocationFileChange}
+                  className="hidden"
+                />
               </div>
             </div>
 
-            {/* Add Zone */}
-            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-2">
-              <h4 className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
+            {/* Error banner if file parsing fails */}
+            {excelError && (
+              <div className="p-3 bg-red-500/20 border border-red-500/40 rounded-xl text-red-200 text-xs flex items-center space-x-2 animate-in fade-in">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                <span>{excelError}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs pt-1 text-slate-300">
+              <div className="flex items-center space-x-2 bg-white/5 p-2.5 rounded-xl border border-white/10">
+                <span className="font-bold text-emerald-400">1. เขตเลือกตั้ง</span>
+                <span className="text-[11px] text-slate-400">(เช่น เขตเลือกตั้งที่ 1)</span>
+              </div>
+              <div className="flex items-center space-x-2 bg-white/5 p-2.5 rounded-xl border border-white/10">
+                <span className="font-bold text-emerald-400">2. อำเภอ</span>
+                <span className="text-[11px] text-slate-400">(เช่น อำเภอเพ็ญ)</span>
+              </div>
+              <div className="flex items-center space-x-2 bg-white/5 p-2.5 rounded-xl border border-white/10">
+                <span className="font-bold text-emerald-400">3. ตำบล</span>
+                <span className="text-[11px] text-slate-400">(เช่น ตำบลเพ็ญ)</span>
+              </div>
+              <div className="flex items-center space-x-2 bg-white/5 p-2.5 rounded-xl border border-white/10">
+                <span className="font-bold text-emerald-400">4. หน่วย &amp; ผู้มีสิทธิ</span>
+                <span className="text-[11px] text-slate-400">(เช่น หน่วยที่ 1 - 1,200 คน)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Create Zone, District & SubDistrict Quick Add Bar (Hierarchy: 1. เขต 2. อำเภอ 3. ตำบล) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* 1. Add Zone (เพิ่มเขตเลือกตั้งใหม่) */}
+            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-2.5">
+              <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
                 <MapPin className="w-4 h-4 text-orange-500" />
-                <span>เพิ่มเขตเลือกตั้งใหม่</span>
+                <span>1. เพิ่มเขตเลือกตั้งใหม่</span>
               </h4>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2 min-w-0 w-full">
                 <select
                   value={newZoneDistrictId}
                   onChange={(e) => setNewZoneDistrictId(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-xs rounded-xl px-2 py-1.5"
+                  className="bg-slate-50 border border-slate-200 text-xs font-medium rounded-xl px-2 py-2 w-28 shrink-0 text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
                 >
-                  {districts.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
+                  {districts.length === 0 ? (
+                    <option value="">--เลือก--</option>
+                  ) : (
+                    districts.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))
+                  )}
                 </select>
                 <input
                   type="text"
                   placeholder="เช่น เขตเลือกตั้งที่ 4"
                   value={newZoneName}
                   onChange={(e) => setNewZoneName(e.target.value)}
-                  className="flex-1 bg-slate-50 border border-slate-200 text-xs rounded-xl px-3 py-1.5 text-slate-900 focus:outline-none"
+                  className="min-w-0 flex-1 bg-slate-50 border border-slate-200 text-xs rounded-xl px-2.5 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
                 />
                 <button
                   type="button"
                   onClick={() => {
                     if (newZoneName.trim()) {
+                      const dist = districts.find((d) => d.id === newZoneDistrictId) || districts[0];
                       addZone({
-                        name: newZoneName,
+                        name: newZoneName.trim(),
                         zoneNumber: zones.length + 1,
-                        districtId: newZoneDistrictId,
+                        districtId: dist ? dist.id : '',
                       });
+                      showToast(`เพิ่มเขต "${newZoneName.trim()}" เรียบร้อยแล้ว`);
                       setNewZoneName('');
                     }
                   }}
-                  className="bg-orange-500 text-white font-bold text-xs px-3 py-1.5 rounded-xl hover:bg-orange-600"
+                  className="bg-orange-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl hover:bg-orange-600 shrink-0 whitespace-nowrap cursor-pointer transition-colors shadow-xs"
                 >
                   เพิ่มเขต
                 </button>
+              </div>
+            </div>
+
+            {/* 2. Add District (เพิ่มอำเภอใหม่) */}
+            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-2.5">
+              <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                <Building2 className="w-4 h-4 text-indigo-600" />
+                <span>2. เพิ่มอำเภอใหม่</span>
+              </h4>
+              <div className="flex items-center gap-2 min-w-0 w-full">
+                <input
+                  type="text"
+                  placeholder="เช่น อำเภอเมืองเชียงใหม่"
+                  value={newDistrictName}
+                  onChange={(e) => setNewDistrictName(e.target.value)}
+                  className="min-w-0 flex-1 bg-slate-50 border border-slate-200 text-xs rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (newDistrictName.trim()) {
+                      addDistrict({ name: newDistrictName.trim(), code: 'D_' + Date.now() });
+                      showToast(`เพิ่มอำเภอ "${newDistrictName.trim()}" เรียบร้อยแล้ว`);
+                      setNewDistrictName('');
+                    }
+                  }}
+                  className="bg-indigo-600 text-white font-bold text-xs px-3.5 py-2 rounded-xl hover:bg-indigo-700 shrink-0 whitespace-nowrap cursor-pointer transition-colors shadow-xs"
+                >
+                  เพิ่มอำเภอ
+                </button>
+              </div>
+            </div>
+
+            {/* 3. Add SubDistrict (เพิ่มตำบลใหม่) */}
+            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-2.5">
+              <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                <Building2 className="w-4 h-4 text-emerald-600" />
+                <span>3. เพิ่มตำบลใหม่</span>
+              </h4>
+              <div className="flex items-center gap-2 min-w-0 w-full">
+                <select
+                  value={newSubDistrictDistrictId}
+                  onChange={(e) => setNewSubDistrictDistrictId(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 text-xs font-medium rounded-xl px-2 py-2 w-28 shrink-0 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                >
+                  {districts.length === 0 ? (
+                    <option value="">--เลือก--</option>
+                  ) : (
+                    districts.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <input
+                  type="text"
+                  placeholder="เช่น ต.สุเทพ"
+                  value={newSubDistrictName}
+                  onChange={(e) => setNewSubDistrictName(e.target.value)}
+                  className="min-w-0 flex-1 bg-slate-50 border border-slate-200 text-xs rounded-xl px-2.5 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (newSubDistrictName.trim()) {
+                      const dist = districts.find((d) => d.id === newSubDistrictDistrictId) || districts[0];
+                      addSubDistrict({
+                        name: newSubDistrictName.trim(),
+                        districtId: dist ? dist.id : '',
+                      });
+                      showToast(`เพิ่มตำบล "${newSubDistrictName.trim()}" เรียบร้อยแล้ว`);
+                      setNewSubDistrictName('');
+                    }
+                  }}
+                  className="bg-emerald-600 text-white font-bold text-xs px-3.5 py-2 rounded-xl hover:bg-emerald-700 shrink-0 whitespace-nowrap cursor-pointer transition-colors shadow-xs"
+                >
+                  เพิ่มตำบล
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* List & Delete Controls for Zones, Districts & SubDistricts */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Zones List */}
+            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-orange-500" />
+                  <span>รายการเขตเลือกตั้ง ({zones.length})</span>
+                </h4>
+              </div>
+              <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                {zones.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 py-2 text-center">ไม่มีข้อมูลเขตเลือกตั้ง</p>
+                ) : (
+                  zones.map((z) => {
+                    const dName = districts.find((d) => d.id === z.districtId)?.name || '';
+                    const stCount = pollingStations.filter((s) => s.zoneId === z.id).length;
+                    return (
+                      <div
+                        key={z.id}
+                        className="flex items-center justify-between p-2 rounded-xl bg-slate-50 hover:bg-slate-100/80 transition-colors border border-slate-100"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <div className="font-bold text-xs text-slate-800 truncate">{z.name}</div>
+                          <div className="text-[10px] text-slate-500 truncate">
+                            {dName} • {stCount} หน่วย
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfirmModal({
+                              isOpen: true,
+                              title: 'ยืนยันการลบเขตเลือกตั้ง',
+                              message: `คุณต้องการลบ "${z.name}" ออกจากระบบใช่หรือไม่? (การลบเขตจะลบหน่วยเลือกตั้งในเขตนี้ด้วย)`,
+                              actionText: 'ลบเขตเลือกตั้ง',
+                              isDanger: true,
+                              onConfirm: () => {
+                                deleteZone(z.id);
+                                showToast(`ลบ "${z.name}" เรียบร้อยแล้ว`);
+                              },
+                            });
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors shrink-0 cursor-pointer"
+                          title="ลบเขต"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Districts List */}
+            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                  <Building2 className="w-4 h-4 text-indigo-600" />
+                  <span>รายการอำเภอ ({districts.length})</span>
+                </h4>
+              </div>
+              <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                {districts.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 py-2 text-center">ไม่มีข้อมูลอำเภอ</p>
+                ) : (
+                  districts.map((d) => {
+                    const zCount = zones.filter((z) => z.districtId === d.id).length;
+                    const sdCount = subDistricts.filter((sd) => sd.districtId === d.id).length;
+                    return (
+                      <div
+                        key={d.id}
+                        className="flex items-center justify-between p-2 rounded-xl bg-slate-50 hover:bg-slate-100/80 transition-colors border border-slate-100"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <div className="font-bold text-xs text-slate-800 truncate">{d.name}</div>
+                          <div className="text-[10px] text-slate-500 truncate">
+                            {zCount} เขต • {sdCount} ตำบล
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfirmModal({
+                              isOpen: true,
+                              title: 'ยืนยันการลบอำเภอ',
+                              message: `คุณต้องการลบ "${d.name}" ออกจากระบบใช่หรือไม่? (การลบอำเภอจะลบเขตเลือกตั้ง ตำบล และหน่วยเลือกตั้งที่เกี่ยวข้องด้วย)`,
+                              actionText: 'ลบอำเภอ',
+                              isDanger: true,
+                              onConfirm: () => {
+                                deleteDistrict(d.id);
+                                showToast(`ลบ "${d.name}" เรียบร้อยแล้ว`);
+                              },
+                            });
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors shrink-0 cursor-pointer"
+                          title="ลบอำเภอ"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* SubDistricts List */}
+            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                  <Building2 className="w-4 h-4 text-emerald-600" />
+                  <span>รายการตำบล ({subDistricts.length})</span>
+                </h4>
+              </div>
+              <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                {subDistricts.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 py-2 text-center">ไม่มีข้อมูลตำบล</p>
+                ) : (
+                  subDistricts.map((sd) => {
+                    let dName = districts.find((d) => d.id === sd.districtId)?.name;
+                    if (!dName) {
+                      const st = pollingStations.find((s) => s.subDistrictId === sd.id);
+                      if (st) {
+                        dName = districts.find((d) => d.id === st.districtId)?.name;
+                      }
+                    }
+                    const stCount = pollingStations.filter((s) => s.subDistrictId === sd.id).length;
+                    return (
+                      <div
+                        key={sd.id}
+                        className="flex items-center justify-between p-2 rounded-xl bg-slate-50 hover:bg-slate-100/80 transition-colors border border-slate-100"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <div className="font-bold text-xs text-slate-800 truncate">{sd.name}</div>
+                          <div className="text-[10px] text-slate-500 truncate">
+                            {dName ? dName : <span className="text-amber-600 font-semibold">ไม่ระบุอำเภอ</span>} • {stCount} หน่วย
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfirmModal({
+                              isOpen: true,
+                              title: 'ยืนยันการลบตำบล',
+                              message: `คุณต้องการลบตำบล "${sd.name}" ออกจากระบบใช่หรือไม่?`,
+                              actionText: 'ลบตำบล',
+                              isDanger: true,
+                              onConfirm: () => {
+                                deleteSubDistrict(sd.id);
+                                showToast(`ลบตำบล "${sd.name}" เรียบร้อยแล้ว`);
+                              },
+                            });
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors shrink-0 cursor-pointer"
+                          title="ลบตำบล"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>
@@ -742,16 +1214,44 @@ export const AdminSettingsPage: React.FC = () => {
             <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-2">
               <MapPin className="w-4 h-4 text-indigo-600" />
               <span>
-                {editingStationId ? 'แก้ไขหน่วยเลือกตั้ง' : 'เพิ่มหน่วยเลือกตั้งใหม่'}
+                {editingStationId ? 'แก้ไขหน่วยเลือกตั้ง' : '4. เพิ่มหน่วยเลือกตั้งใหม่'}
               </span>
             </h3>
 
-            <form onSubmit={handleSaveStation} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <form onSubmit={handleSaveStation} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              {/* 1. Zone (เขตเลือกตั้ง) */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">อำเภอ:</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">1. เขตเลือกตั้ง:</label>
+                <select
+                  value={stZoneId}
+                  onChange={(e) => setStZoneId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold"
+                >
+                  <option value="">-- ไม่ระบุเขต --</option>
+                  {zones
+                    .filter((z) => !stDistrictId || !z.districtId || z.districtId === stDistrictId)
+                    .concat(zones.filter((z) => z.districtId && z.districtId !== stDistrictId))
+                    .map((z) => (
+                      <option key={z.id} value={z.id}>
+                        {z.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {/* 2. District (อำเภอ) */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">2. อำเภอ:</label>
                 <select
                   value={stDistrictId}
-                  onChange={(e) => setStDistrictId(e.target.value)}
+                  onChange={(e) => {
+                    const nextDId = e.target.value;
+                    setStDistrictId(nextDId);
+                    const matchingSub = subDistricts.find((sd) => sd.districtId === nextDId);
+                    if (matchingSub) setStSubDistrictId(matchingSub.id);
+                    const matchingZone = zones.find((z) => z.districtId === nextDId);
+                    if (matchingZone) setStZoneId(matchingZone.id);
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold"
                 >
                   {districts.map((d) => (
@@ -762,28 +1262,31 @@ export const AdminSettingsPage: React.FC = () => {
                 </select>
               </div>
 
+              {/* 3. SubDistrict (ตำบล) */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">เขตเลือกตั้ง:</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">3. ตำบล:</label>
                 <select
-                  value={stZoneId}
-                  onChange={(e) => setStZoneId(e.target.value)}
+                  value={stSubDistrictId}
+                  onChange={(e) => setStSubDistrictId(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold"
                 >
-                  {zones.map((z) => (
-                    <option key={z.id} value={z.id}>
-                      {z.name}
+                  <option value="">-- ไม่ระบุตำบล --</option>
+                  {availableSubDistrictsForStationForm.map((sd) => (
+                    <option key={sd.id} value={sd.id}>
+                      {sd.name}
                     </option>
                   ))}
                 </select>
               </div>
 
+              {/* 4. Station Name (ชื่อหน่วยเลือกตั้ง) */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  ชื่อหน่วยเลือกตั้ง:
+                  4. ชื่อหน่วยเลือกตั้ง:
                 </label>
                 <input
                   type="text"
-                  placeholder="เช่น หน่วยที่ 1 วัดหางดง"
+                  placeholder="เช่น หน่วยที่ 1"
                   value={stName}
                   onChange={(e) => setStName(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium"
@@ -791,6 +1294,7 @@ export const AdminSettingsPage: React.FC = () => {
                 />
               </div>
 
+              {/* 5. Eligible Voters */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   ผู้มีสิทธิเลือกตั้ง (คน):
@@ -805,10 +1309,22 @@ export const AdminSettingsPage: React.FC = () => {
                 />
               </div>
 
-              <div className="sm:col-span-4 flex justify-end gap-2 pt-2">
+              <div className="sm:col-span-2 lg:col-span-5 flex justify-end gap-2 pt-2">
+                {editingStationId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingStationId(null);
+                      setStName('');
+                    }}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
+                  >
+                    ยกเลิก
+                  </button>
+                )}
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5"
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
                   <span>{editingStationId ? 'บันทึกการแก้ไขหน่วย' : 'เพิ่มหน่วยเลือกตั้ง'}</span>
@@ -876,16 +1392,52 @@ export const AdminSettingsPage: React.FC = () => {
 
           {/* Station List Table (ติ๊กช่องนับเสร็จรายหน่วย) */}
           <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-3">
-            <h3 className="font-bold text-sm text-slate-900 border-b border-slate-100 pb-2 flex items-center justify-between">
-              <span>หน่วยเลือกตั้งทั้งหมด ({pollingStations.length} หน่วย)</span>
-              <span className="text-xs text-slate-500 font-normal">
-                นับเสร็จแล้ว: {pollingStations.filter((s) => s.status === 'completed').length} / {pollingStations.length} หน่วย
-              </span>
-            </h3>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                  <span>
+                    หน่วยเลือกตั้งทั้งหมด ({pollingStations.filter((s) => stationSubFilter === 'all' || s.subDistrictId === stationSubFilter).length} / {pollingStations.length} หน่วย)
+                  </span>
+                </h3>
+                <span className="text-xs text-slate-500 font-normal">
+                  นับเสร็จแล้ว: {pollingStations.filter((s) => s.status === 'completed').length} / {pollingStations.length} หน่วย
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* SubDistrict Filter */}
+                <select
+                  value={stationSubFilter}
+                  onChange={(e) => setStationSubFilter(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="all">แสดงทุกตำบล ({subDistricts.length} ตำบล)</option>
+                  {subDistricts.map((sd) => (
+                    <option key={sd.id} value={sd.id}>
+                      ตำบล {sd.name}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Deduplicate Button */}
+                <button
+                  type="button"
+                  onClick={handleRunDeduplication}
+                  className="px-3.5 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300/80 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-colors cursor-pointer"
+                  title="ลบหรือรวมหน่วยเลือกตั้งที่มีชื่อซ้ำกันในตำบลเดียวกัน"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-800" />
+                  <span>ขจัดหน่วยซ้ำ (ยึดตำบลเป็นหลัก)</span>
+                </button>
+              </div>
+            </div>
 
             <div className="space-y-2">
-              {pollingStations.map((station) => {
+              {pollingStations
+                .filter((s) => stationSubFilter === 'all' || s.subDistrictId === stationSubFilter)
+                .map((station) => {
                 const dName = districts.find((d) => d.id === station.districtId)?.name;
+                const sdName = subDistricts.find((sd) => sd.id === station.subDistrictId)?.name;
                 const zName = zones.find((z) => z.id === station.zoneId)?.name;
                 const isCompleted = station.status === 'completed';
 
@@ -909,8 +1461,13 @@ export const AdminSettingsPage: React.FC = () => {
                       />
 
                       <div>
-                        <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                        <div className="font-bold text-slate-900 text-sm flex flex-wrap items-center gap-2">
                           <span>{station.name}</span>
+                          {sdName && (
+                            <span className="text-[11px] font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 rounded-lg">
+                              ต.{sdName}
+                            </span>
+                          )}
                           {isCompleted ? (
                             <span className="text-[10px] bg-emerald-100 text-emerald-800 font-extrabold px-2 py-0.5 rounded-full border border-emerald-200">
                               ✓ นับเสร็จแล้ว
@@ -922,9 +1479,9 @@ export const AdminSettingsPage: React.FC = () => {
                           )}
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5">
-                          {dName} • {zName} • ผู้มีสิทธิ:{' '}
+                          {dName || ''} {sdName ? `• ตำบล${sdName}` : ''} • {zName || ''} • ผู้มีสิทธิ:{' '}
                           <span className="font-semibold text-slate-800">
-                            {station.totalEligibleVoters.toLocaleString()} คน
+                            {(station.totalEligibleVoters ?? 0).toLocaleString()} คน
                           </span>
                         </div>
                       </div>
@@ -943,11 +1500,36 @@ export const AdminSettingsPage: React.FC = () => {
 
                       <button
                         onClick={() => {
-                          if (confirm(`คุณต้องการลบหน่วย "${station.name}" หรือไม่?`)) {
-                            deletePollingStation(station.id);
-                          }
+                          setEditingStationId(station.id);
+                          setStName(station.name);
+                          setStNumber(station.stationNumber);
+                          setStDistrictId(station.districtId);
+                          setStSubDistrictId(station.subDistrictId || subDistricts[0]?.id || '');
+                          setStZoneId(station.zoneId);
+                          setStVoters(station.totalEligibleVoters);
                         }}
-                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors"
+                        className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
+                        title="แก้ไขหน่วย"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmModal({
+                            isOpen: true,
+                            title: 'ยืนยันการลบหน่วยเลือกตั้ง',
+                            message: `คุณต้องการลบหน่วย "${station.name}" ออกจากระบบใช่หรือไม่?`,
+                            actionText: 'ลบหน่วยเลือกตั้ง',
+                            isDanger: true,
+                            onConfirm: () => {
+                              deletePollingStation(station.id);
+                              showToast(`ลบหน่วย "${station.name}" เรียบร้อยแล้ว`);
+                            },
+                          });
+                        }}
+                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
                         title="ลบหน่วย"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1034,50 +1616,257 @@ export const AdminSettingsPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Export CSV Card */}
-            <div className="p-5 bg-indigo-50/70 border border-indigo-100 rounded-2xl space-y-3">
-              <div className="flex items-center space-x-2 text-indigo-900 font-bold text-sm">
-                <Download className="w-5 h-5 text-indigo-600" />
-                <span>ส่งออกรายงานคะแนน (Export CSV)</span>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Export CSV Card */}
+              <div className="p-5 bg-indigo-50/70 border border-indigo-100 rounded-2xl space-y-3 flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2 text-indigo-900 font-bold text-sm">
+                    <Download className="w-5 h-5 text-indigo-600" />
+                    <span>ส่งออกรายงานคะแนน CSV</span>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    ดาวน์โหลดไฟล์สรุปคะแนนผู้สมัครทุกพรรคแยกตามลำดับ สำหรับนำไปประมวลผลต่อใน Excel
+                  </p>
+                </div>
+                <button
+                  onClick={handleExportCSV}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center space-x-2 shadow-xs transition-colors cursor-pointer mt-3"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>ดาวน์โหลด CSV</span>
+                </button>
               </div>
-              <p className="text-xs text-slate-600">
-                ดาวน์โหลดไฟล์สรุปคะแนนผู้สมัครทุกพรรคแยกตามลำดับ สำหรับนำไปประมวลผลต่อใน Excel
-              </p>
+
+              {/* Clear All Votes Card */}
+              <div className="p-5 bg-amber-50/70 border border-amber-200/90 rounded-2xl space-y-3 flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2 text-amber-900 font-bold text-sm">
+                    <RotateCcw className="w-5 h-5 text-amber-600" />
+                    <span>ล้างผลคะแนนทั้งหมด (Clear Votes)</span>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    ล้างคะแนนที่บันทึกไว้ทุกหน่วยเลือกตั้งกลับเป็น 0 (คงผู้สมัครและหน่วยเลือกตั้งเดิมไว้)
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmModal({
+                      isOpen: true,
+                      title: 'ยืนยันการล้างคะแนนเป็น 0',
+                      message: 'คุณแน่ใจหรือไม่ว่าต้องการล้างผลคะแนนทั้งหมดกลับเป็น 0? (ผู้สมัครและหน่วยเลือกตั้งจะยังคงเดิม)',
+                      actionText: 'ล้างคะแนนเป็น 0 ทั้งหมด',
+                      isDanger: true,
+                      onConfirm: () => {
+                        clearAllVotes();
+                        showToast('ล้างผลคะแนนเรียบร้อยแล้ว!');
+                      },
+                    });
+                  }}
+                  className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center space-x-2 shadow-xs transition-colors cursor-pointer mt-3"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>ล้างคะแนนเป็น 0 ทั้งหมด</span>
+                </button>
+              </div>
+
+              {/* Clear All System Data / Reset Default Card */}
+              <div className="p-5 bg-red-50/70 border border-red-200/90 rounded-2xl space-y-3 flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2 text-red-900 font-bold text-sm">
+                    <Trash2 className="w-5 h-5 text-red-600" />
+                    <span>ล้างข้อมูล / รีเซ็ตระบบ</span>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    ล้างข้อมูลทั้งหมดในระบบ หรือโหลดข้อมูลตัวอย่างเริ่มต้น
+                  </p>
+                </div>
+                <div className="space-y-2 mt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmModal({
+                        isOpen: true,
+                        title: 'คำเตือน: ล้างข้อมูลทั้งหมดในระบบ',
+                        message: 'คุณต้องการล้างข้อมูลทั้งหมด (ผู้สมัคร พรรค เขต และคะแนน) ออกจากระบบใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้',
+                        actionText: 'ล้างข้อมูลทั้งหมด',
+                        isDanger: true,
+                        onConfirm: () => {
+                          clearAllData();
+                          showToast('ล้างข้อมูลทั้งหมดเรียบร้อยแล้ว!');
+                        },
+                      });
+                    }}
+                    className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center space-x-2 shadow-xs transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>ล้างข้อมูลทั้งหมด (Wipe All)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmModal({
+                        isOpen: true,
+                        title: 'ยืนยันการโหลดข้อมูลตัวอย่าง',
+                        message: 'คุณแน่ใจหรือไม่ว่าต้องการรีเซ็ตกลับเป็นข้อมูลตัวอย่างเริ่มต้น?',
+                        actionText: 'โหลดข้อมูลตัวอย่าง',
+                        isDanger: false,
+                        onConfirm: () => {
+                          resetToDefaultData();
+                          showToast('รีเซ็ตเป็นข้อมูลตัวอย่างเรียบร้อยแล้ว!');
+                        },
+                      });
+                    }}
+                    className="w-full bg-slate-700 hover:bg-slate-800 text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center space-x-2 shadow-xs transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>โหลดข้อมูลตัวอย่าง (Default Sample)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+        </div>
+      </div>
+      )}
+      {/* Excel Location Import Preview Modal */}
+      {showExcelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl p-6 max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-emerald-100 text-emerald-700 rounded-2xl">
+                  <FileSpreadsheet className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">
+                    ตรวจสอบข้อมูลนำเข้าจากไฟล์ Excel
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    ตรวจสอบรายการก่อนบันทึกเข้าสู่ระบบฐานข้อมูล (เขตเลือกตั้ง &gt; อำเภอ &gt; ตำบล &gt; หน่วยเลือกตั้ง)
+                  </p>
+                </div>
+              </div>
               <button
-                onClick={handleExportCSV}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center space-x-2 shadow-xs transition-colors"
+                type="button"
+                onClick={() => setShowExcelModal(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 cursor-pointer"
               >
-                <Download className="w-4 h-4" />
-                <span>ดาวน์โหลดรายงานสรุปคะแนน CSV</span>
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Reset Data Card */}
-            <div className="p-5 bg-red-50/70 border border-red-100 rounded-2xl space-y-3">
-              <div className="flex items-center space-x-2 text-red-900 font-bold text-sm">
-                <RotateCcw className="w-5 h-5 text-red-600" />
-                <span>รีเซ็ตข้อมูลเลือกตั้ง (Reset Default)</span>
+            {/* Summary Badge */}
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="font-bold text-emerald-900 flex items-center gap-2">
+                <CheckCircle2 className="w-4.5 h-4.5 text-emerald-600" />
+                <span>พบข้อมูลพร้อมนำเข้าทั้งหมด {excelRows.length} รายการ</span>
               </div>
-              <p className="text-xs text-slate-600">
-                ล้างข้อมูลคะแนนที่กรอกทั้งหมด และโหลดชุดข้อมูลตัวอย่างการเลือกตั้งเริ่มต้น
-              </p>
+              <div className="text-slate-600 font-medium">
+                * ระบบจะสร้าง อำเภอ, ตำบล, เขต และหน่วยเลือกตั้งที่ยังไม่มีให้อัตโนมัติ
+              </div>
+            </div>
+
+            {/* Rows Table */}
+            <div className="flex-1 overflow-y-auto border border-slate-200 rounded-2xl">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-100/80 text-slate-700 font-bold border-b border-slate-200 sticky top-0">
+                    <th className="py-2.5 px-3">#</th>
+                    <th className="py-2.5 px-3">เขตเลือกตั้ง</th>
+                    <th className="py-2.5 px-3">อำเภอ</th>
+                    <th className="py-2.5 px-3">ตำบล</th>
+                    <th className="py-2.5 px-3">หน่วยเลือกตั้ง</th>
+                    <th className="py-2.5 px-3 text-right">ผู้มีสิทธิเลือกตั้ง (คน)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {excelRows.map((row, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-2 px-3 text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">{row.zoneName || 'เขตเลือกตั้งที่ 1'}</td>
+                      <td className="py-2 px-3 font-bold text-indigo-900">{row.districtName}</td>
+                      <td className="py-2 px-3 text-slate-700 font-medium">{row.subDistrictName || '-'}</td>
+                      <td className="py-2 px-3 text-slate-900 font-semibold">{row.stationName}</td>
+                      <td className="py-2 px-3 text-right font-bold text-slate-800 font-mono">
+                        {(row.totalEligibleVoters || 1000).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+              <span className="text-xs text-slate-500 font-medium">
+                แสดงตัวอย่าง {excelRows.length} แถว
+              </span>
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowExcelModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmExcelImport}
+                  className="px-5 py-2 text-xs font-extrabold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-xl shadow-md transition-all cursor-pointer flex items-center space-x-1.5"
+                >
+                  <FileCheck className="w-4 h-4 text-slate-950" />
+                  <span>ยืนยันนำเข้าข้อมูลเข้าสู่ระบบ</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirmation Modal */}
+      {confirmModal?.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-start space-x-3">
+              <div className={`p-3 rounded-2xl shrink-0 ${confirmModal.isDanger ? 'bg-red-100 text-red-600' : 'bg-indigo-100 text-indigo-600'}`}>
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900">{confirmModal.title}</h3>
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">{confirmModal.message}</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100">
               <button
-                onClick={() => {
-                  if (confirm('คุณแน่ใจหรือไม่ว่าต้องการรีเซ็ตคะแนนทั้งหมดกลับเป็นค่าเริ่มต้น?')) {
-                    resetToDefaultData();
-                    alert('รีเซ็ตข้อมูลการเลือกตั้งเรียบร้อยแล้ว!');
-                  }
-                }}
-                className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center space-x-2 shadow-xs transition-colors"
+                type="button"
+                onClick={() => setConfirmModal(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
               >
-                <RotateCcw className="w-4 h-4" />
-                <span>ล้างคะแนนและโหลดค่าเริ่มต้น</span>
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  confirmModal.onConfirm();
+                  setConfirmModal(null);
+                }}
+                className={`px-4 py-2 text-xs font-bold text-white rounded-xl transition-colors cursor-pointer shadow-xs ${
+                  confirmModal.isDanger ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
+              >
+                {confirmModal.actionText}
               </button>
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl text-xs font-bold flex items-center space-x-2.5 animate-in slide-in-from-bottom-2 duration-200">
+          <CheckCircle className="w-4.5 h-4.5 text-emerald-400 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
       )}
     </div>
   );

@@ -1,7 +1,6 @@
 import React from 'react';
 import { ElectionProvider, useElection } from './context/ElectionContext';
 import { Header } from './components/Header';
-import { LiveAlertToast } from './components/LiveAlertToast';
 import { PublicDashboard } from './components/PublicDashboard';
 import { VoteEntryPage } from './components/VoteEntryPage';
 import { AdminSettingsPage } from './components/AdminSettingsPage';
@@ -13,7 +12,6 @@ const MainContent: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-100/80 text-slate-900 font-sans antialiased flex flex-col justify-between selection:bg-emerald-100 selection:text-emerald-900">
       <Header />
-      <LiveAlertToast />
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-3 sm:px-6 py-6 flex-1 w-full">

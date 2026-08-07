@@ -39,6 +39,7 @@ export const VoteEntryPage: React.FC = () => {
   const {
     candidates,
     districts,
+    subDistricts,
     zones,
     pollingStations,
     votes,
@@ -51,6 +52,7 @@ export const VoteEntryPage: React.FC = () => {
 
   // Selection state
   const [selectedDistrictId, setSelectedDistrictId] = useState<string>(districts[0]?.id || '');
+  const [selectedSubDistrictId, setSelectedSubDistrictId] = useState<string>('all');
   const [selectedZoneId, setSelectedZoneId] = useState<string>(zones[0]?.id || '');
   const [selectedStationId, setSelectedStationId] = useState<string>(pollingStations[0]?.id || '');
 
@@ -70,17 +72,121 @@ export const VoteEntryPage: React.FC = () => {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
 
+  // Available districts for selected zone
+  const availableDistricts = useMemo(() => {
+    if (!selectedZoneId || selectedZoneId === 'all') return districts;
+
+    const zoneStationDistrictIds = new Set(
+      pollingStations.filter((s) => s.zoneId === selectedZoneId && s.districtId).map((s) => s.districtId)
+    );
+    const matching = districts.filter(
+      (d) => zoneStationDistrictIds.has(d.id) || zones.some((z) => z.id === selectedZoneId && z.districtId === d.id)
+    );
+
+    return matching.length > 0 ? matching : districts;
+  }, [districts, zones, pollingStations, selectedZoneId]);
+
+  // Available subdistricts for selected district & zone
+  const availableSubDistricts = useMemo(() => {
+    let list = subDistricts;
+
+    if (selectedDistrictId && selectedDistrictId !== 'all') {
+      const filtered = list.filter((sd) => sd.districtId === selectedDistrictId);
+      if (filtered.length > 0) return filtered;
+
+      const stationSubIds = new Set(
+        pollingStations.filter((s) => s.districtId === selectedDistrictId && s.subDistrictId).map((s) => s.subDistrictId)
+      );
+      const matchedByStation = list.filter((sd) => stationSubIds.has(sd.id) || !sd.districtId);
+      if (matchedByStation.length > 0) return matchedByStation;
+
+      return list;
+    } else if (selectedZoneId && selectedZoneId !== 'all') {
+      const zoneDistrictIds = new Set(availableDistricts.map((d) => d.id));
+      const filtered = list.filter((sd) => !sd.districtId || (sd.districtId && zoneDistrictIds.has(sd.districtId)));
+      return filtered.length > 0 ? filtered : list;
+    }
+
+    return list;
+  }, [subDistricts, selectedDistrictId, selectedZoneId, availableDistricts, pollingStations]);
+
   // Available zones for selected district
   const availableZones = useMemo(() => {
-    return zones.filter((z) => z.districtId === selectedDistrictId);
-  }, [zones, selectedDistrictId]);
+    if (!selectedDistrictId || selectedDistrictId === 'all') return zones;
 
-  // Available polling stations for selected zone
-  const availableStations = useMemo(() => {
-    return pollingStations.filter(
-      (s) => s.districtId === selectedDistrictId && s.zoneId === selectedZoneId
+    const districtStationZoneIds = new Set(
+      pollingStations.filter((s) => s.districtId === selectedDistrictId).map((s) => s.zoneId)
     );
-  }, [pollingStations, selectedDistrictId, selectedZoneId]);
+    const matching = zones.filter(
+      (z) => !z.districtId || z.districtId === selectedDistrictId || districtStationZoneIds.has(z.id)
+    );
+
+    return matching.length > 0 ? matching : zones;
+  }, [zones, pollingStations, selectedDistrictId]);
+
+  // Available polling stations for selected filters (hierarchical filtering by zone, district, subdistrict)
+  const availableStations = useMemo(() => {
+    return pollingStations.filter((s) => {
+      if (selectedZoneId && selectedZoneId !== 'all') {
+        const matchesZoneDirect = s.zoneId === selectedZoneId;
+        const matchesZoneDistrict = s.districtId && zones.some((z) => z.id === selectedZoneId && z.districtId === s.districtId);
+        const matchesZoneSubDistrict = s.subDistrictId && subDistricts.some((sd) => sd.id === s.subDistrictId && sd.districtId && zones.some((z) => z.id === selectedZoneId && z.districtId === sd.districtId));
+        if (!matchesZoneDirect && !matchesZoneDistrict && !matchesZoneSubDistrict) {
+          return false;
+        }
+      }
+
+      if (selectedDistrictId && selectedDistrictId !== 'all') {
+        const directMatch = s.districtId === selectedDistrictId;
+        const subMatch = s.subDistrictId ? subDistricts.some((sd) => sd.id === s.subDistrictId && (sd.districtId === selectedDistrictId || !sd.districtId)) : false;
+        if (!directMatch && !subMatch) return false;
+      }
+
+      if (selectedSubDistrictId && selectedSubDistrictId !== 'all') {
+        if (s.subDistrictId !== selectedSubDistrictId) return false;
+      }
+
+      return true;
+    });
+  }, [pollingStations, subDistricts, zones, selectedDistrictId, selectedSubDistrictId, selectedZoneId]);
+
+  // Auto-sync selectedDistrictId if current selection is invalid
+  useEffect(() => {
+    if (selectedDistrictId !== 'all' && availableDistricts.length > 0) {
+      if (!availableDistricts.some((d) => d.id === selectedDistrictId)) {
+        setSelectedDistrictId('all');
+      }
+    }
+  }, [availableDistricts, selectedDistrictId]);
+
+  // Auto-sync selectedSubDistrictId if current selection is invalid
+  useEffect(() => {
+    if (selectedSubDistrictId !== 'all' && availableSubDistricts.length > 0) {
+      if (!availableSubDistricts.some((sd) => sd.id === selectedSubDistrictId)) {
+        setSelectedSubDistrictId('all');
+      }
+    }
+  }, [availableSubDistricts, selectedSubDistrictId]);
+
+  // Auto-sync selectedZoneId when availableZones changes or current selectedZoneId is not valid
+  useEffect(() => {
+    if (selectedZoneId !== 'all' && availableZones.length > 0) {
+      if (!availableZones.some((z) => z.id === selectedZoneId)) {
+        setSelectedZoneId('all');
+      }
+    }
+  }, [availableZones, selectedZoneId]);
+
+  // Auto-sync selectedStationId when availableStations changes or current selectedStationId is not valid
+  useEffect(() => {
+    if (availableStations.length > 0) {
+      if (!selectedStationId || !availableStations.some((s) => s.id === selectedStationId)) {
+        setSelectedStationId(availableStations[0].id);
+      }
+    } else {
+      setSelectedStationId('');
+    }
+  }, [availableStations, selectedStationId]);
 
   const activeStation = useMemo(() => {
     return pollingStations.find((s) => s.id === selectedStationId);
@@ -122,21 +228,117 @@ export const VoteEntryPage: React.FC = () => {
   };
 
   // Calculated totals
-  const totalValidVotes = (Object.values(candidateVoteCounts) as number[]).reduce((a: number, b: number) => a + b, 0);
+  const totalValidVotes = (Object.values(candidateVoteCounts || {}) as number[]).reduce((a: number, b: number) => a + b, 0);
   const totalVotesThisStation = totalValidVotes + invalidVotes + noVotes;
   const eligibleVoters = activeStation?.totalEligibleVoters || 0;
   const isOverEligibleLimit = eligibleVoters > 0 && totalVotesThisStation > eligibleVoters;
 
-  // Excel Template Download Handler
-  const handleDownloadTemplate = () => {
+  // 1. Download Matrix Template (กกต. Official Grid Format as in attached user screenshot)
+  const handleDownloadMatrixTemplate = () => {
+    const sortedCandidates = [...candidates].sort((a, b) => a.number - b.number);
+    const stationCols = pollingStations.map((s) => {
+      const sdName = subDistricts.find((sd) => sd.id === s.subDistrictId)?.name;
+      const label = sdName ? `${s.name} (ต.${sdName})` : s.name;
+      return `"${(label || '').replace(/"/g, '""')}"`;
+    });
+
+    const titleRow = `"ตารางสรุปผลการลงคะแนนเลือกตั้ง กกต. (จำแนกรายหน่วยและรายตำบล)"`;
+
+    const headerRow = [
+      '"ข้อมูลการใช้สิทธิ / รายการ"',
+      `"ผลรวมคะแนน (${pollingStations.length} หน่วย)"`,
+      ...stationCols,
+    ].join(',');
+
+    const row1_1 = [
+      '"1.1 จำนวนผู้มีสิทธิเลือกตั้ง"',
+      '"-"',
+      ...pollingStations.map((s) => s.totalEligibleVoters || 0),
+    ].join(',');
+    const row1_2 = ['"1.2 ผู้มีสิทธิที่มาแสดงตน"', '"-"', ...pollingStations.map(() => 0)].join(',');
+    const row2_1 = ['"2.1 บัตรที่ได้รับจัดสรร"', '"-"', ...pollingStations.map(() => 0)].join(',');
+    const row2_2 = [
+      '"2.2 บัตรที่ใช้ (บัตรดี+บัตรเสีย+ไม่เลือก)"',
+      '"-"',
+      ...pollingStations.map(() => 0),
+    ].join(',');
+
+    const row2_2_1 = [
+      '"2.2.1 บัตรดี"',
+      '"-"',
+      ...pollingStations.map((s) => {
+        const v = votes.find((item) => item.stationId === s.id);
+        if (!v) return 0;
+        return (Object.values(v.candidateVotes || {}) as number[]).reduce((a, b) => a + b, 0);
+      }),
+    ].join(',');
+
+    const row2_2_2 = [
+      '"2.2.2 บัตรเสีย"',
+      '"-"',
+      ...pollingStations.map((s) => votes.find((item) => item.stationId === s.id)?.invalidVotes || 0),
+    ].join(',');
+
+    const row2_2_3 = [
+      '"2.2.3 บัตรไม่เลือกผู้ใด"',
+      '"-"',
+      ...pollingStations.map((s) => votes.find((item) => item.stationId === s.id)?.noVotes || 0),
+    ].join(',');
+
+    const row2_3 = ['"2.3 บัตรที่เหลือ"', '"-"', ...pollingStations.map(() => 0)].join(',');
+
+    const candSectionHeader = [
+      '"ข้อมูลผลคะแนนผู้สมัคร"',
+      `"ผลรวมคะแนนผู้สมัคร (${pollingStations.length} หน่วย)"`,
+      ...stationCols,
+    ].join(',');
+
+    const candidateRows = sortedCandidates.map((c) => {
+      const candTitle = `"${c.number} ${(c?.name || '').replace(/"/g, '""')}"`;
+      const stationVotes = pollingStations.map((s) => {
+        const v = votes.find((item) => item.stationId === s.id);
+        return v?.candidateVotes?.[c.id] ?? 0;
+      });
+      return [candTitle, '"-"', ...stationVotes].join(',');
+    });
+
+    const csvLines = [
+      titleRow,
+      headerRow,
+      row1_1,
+      row1_2,
+      row2_1,
+      row2_2,
+      row2_2_1,
+      row2_2_2,
+      row2_2_3,
+      row2_3,
+      candSectionHeader,
+      ...candidateRows,
+    ];
+
+    const csvContent = '\uFEFF' + csvLines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `แบบฟอร์มตารางสรุปคะแนน_กกต_Matrix.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // 2. Download Standard List Template
+  const handleDownloadStandardTemplate = () => {
     const sortedCandidates = [...candidates].sort((a, b) => a.number - b.number);
     const candidateHeaders = sortedCandidates.map(
-      (c) => `"คะแนน_เบอร์_${c.number}_(${c.name.replace(/"/g, '""')})"`
+      (c) => `"คะแนน_เบอร์_${c.number}_(${(c?.name || '').replace(/"/g, '""')})"`
     );
 
     const headers = [
       '"รหัสหน่วยเลือกตั้ง"',
       '"ชื่อหน่วยเลือกตั้ง"',
+      '"ตำบล"',
       '"อำเภอ"',
       '"เขตเลือกตั้ง"',
       ...candidateHeaders,
@@ -146,6 +348,7 @@ export const VoteEntryPage: React.FC = () => {
     ];
 
     const rows = pollingStations.map((station) => {
+      const subDistrict = subDistricts.find((sd) => sd.id === station.subDistrictId)?.name || '';
       const district = districts.find((d) => d.id === station.districtId)?.name || '';
       const zone = zones.find((z) => z.id === station.zoneId)?.name || '';
       const existingVote = votes.find((v) => v.stationId === station.id);
@@ -161,13 +364,14 @@ export const VoteEntryPage: React.FC = () => {
 
       return [
         `"${station.id}"`,
-        `"${station.name.replace(/"/g, '""')}"`,
-        `"${district.replace(/"/g, '""')}"`,
-        `"${zone.replace(/"/g, '""')}"`,
+        `"${(station?.name || '').replace(/"/g, '""')}"`,
+        `"${(subDistrict || '').replace(/"/g, '""')}"`,
+        `"${(district || '').replace(/"/g, '""')}"`,
+        `"${(zone || '').replace(/"/g, '""')}"`,
         ...candVotes,
         invalid,
         noVote,
-        `"${officer.replace(/"/g, '""')}"`,
+        `"${(officer || '').replace(/"/g, '""')}"`,
       ].join(',');
     });
 
@@ -176,13 +380,13 @@ export const VoteEntryPage: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `แบบฟอร์มบันทึกคะแนนเลือกตั้ง_กกต_อุดรธานี.csv`);
+    link.setAttribute('download', `แบบฟอร์มบันทึกคะแนน_รายหน่วย.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // Excel / CSV File Upload Parser
+  // Excel / CSV File Upload Parser (Smart Dual-Mode: Matrix & List)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -195,95 +399,239 @@ export const VoteEntryPage: React.FC = () => {
         const text = event.target?.result as string;
         if (!text) throw new Error('ไม่พบข้อมูลในไฟล์ที่เลือก');
 
-        let cleanText = text.replace(/^\uFEFF/, '');
-        const lines = cleanText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
-        if (lines.length < 2) {
-          throw new Error('ไฟล์ Excel/CSV ต้องมีอย่างน้อย 1 แถวส่วนหัวและ 1 แถวข้อมูล');
+        let cleanText = (text || '').replace(/^\uFEFF/, '');
+        const rawLines = cleanText
+          .split(/\r?\n/)
+          .map((l) => (l || '').trim())
+          .filter((l) => l.length > 0);
+        if (rawLines.length < 2) {
+          throw new Error('ไฟล์ Excel/CSV ต้องมีอย่างน้อย 2 แถว');
         }
 
         const parseRow = (rowStr: string) => {
-          return rowStr
+          return (rowStr || '')
             .split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
-            .map((cell) => cell.replace(/^"|"$/g, '').trim());
+            .map((cell) => (cell || '').replace(/^"|"$/g, '').trim());
         };
-
-        const headers = parseRow(lines[0]);
-
-        // Map header indices
-        const stationIdIdx = headers.findIndex(
-          (h) => h.includes('รหัสหน่วย') || h.toLowerCase().includes('stationid') || h.includes('id')
-        );
-        const stationNameIdx = headers.findIndex(
-          (h) => h.includes('ชื่อหน่วย') || h.includes('หน่วยเลือกตั้ง')
-        );
-        const invalidIdx = headers.findIndex((h) => h.includes('บัตรเสีย'));
-        const noVoteIdx = headers.findIndex((h) => h.includes('ไม่ประสงค์'));
-        const officerIdx = headers.findIndex((h) => h.includes('เจ้าหน้าที่') || h.includes('ผู้บันทึก'));
-
-        // Map candidates to header indices
-        const candidateColMap: { candidateId: string; colIdx: number }[] = [];
-        candidates.forEach((cand) => {
-          const colIdx = headers.findIndex(
-            (h) =>
-              h.includes(`เบอร์_${cand.number}_`) ||
-              h.includes(`เบอร์ ${cand.number}`) ||
-              h.includes(`หมายเลข ${cand.number}`) ||
-              h.includes(`เบอร์_${cand.number}`) ||
-              h.includes(`candidate_${cand.number}`)
-          );
-          if (colIdx !== -1) {
-            candidateColMap.push({ candidateId: cand.id, colIdx });
-          }
-        });
 
         const parsedRows: ParsedImportRow[] = [];
 
-        for (let i = 1; i < lines.length; i++) {
-          const cells = parseRow(lines[i]);
-          if (cells.length === 0 || !cells.some((c) => c !== '')) continue;
+        // Auto-detect matrix table vs standard list format
+        const isMatrixFormat = rawLines.some(
+          (line) =>
+            line.includes('ข้อมูลการใช้สิทธิ') ||
+            line.includes('2.2.1') ||
+            line.includes('2.2.2') ||
+            line.includes('2.2.3') ||
+            line.includes('ข้อมูลผลคะแนนผู้สมัคร')
+        );
 
-          const rawStationId = stationIdIdx !== -1 ? cells[stationIdIdx] : '';
-          const rawStationName = stationNameIdx !== -1 ? cells[stationNameIdx] : '';
-
-          let matchedStation = pollingStations.find(
-            (s) => s.id === rawStationId || s.name === rawStationName || s.name.includes(rawStationName)
-          );
-
-          if (!matchedStation && rawStationName) {
-            const numMatch = rawStationName.match(/\d+/);
-            if (numMatch) {
-              const stNum = parseInt(numMatch[0]);
-              matchedStation = pollingStations.find((s) => s.stationNumber === stNum);
+        if (isMatrixFormat) {
+          // --- MATRIX FORMAT PARSING ---
+          let stationHeaderRowIdx = -1;
+          for (let i = 0; i < rawLines.length; i++) {
+            const cells = parseRow(rawLines[i]);
+            if (
+              cells.some(
+                (c) => c.includes('หน่วยที่') || c.includes('หน่วยเลือกตั้ง') || c.includes('หน่วย')
+              )
+            ) {
+              stationHeaderRowIdx = i;
+              break;
             }
           }
 
-          const candidateVotes: Record<string, number> = {};
-          candidateColMap.forEach(({ candidateId, colIdx }) => {
-            const val = parseInt(cells[colIdx] || '0');
-            candidateVotes[candidateId] = isNaN(val) ? 0 : Math.max(0, val);
+          if (stationHeaderRowIdx === -1) {
+            stationHeaderRowIdx = 1;
+          }
+
+          const headerCells = parseRow(rawLines[stationHeaderRowIdx]);
+          const stationCols: {
+            colIdx: number;
+            station: (typeof pollingStations)[0] | undefined;
+            rawName: string;
+          }[] = [];
+
+          for (let c = 2; c < headerCells.length; c++) {
+            const colText = headerCells[c];
+            if (!colText) continue;
+
+            let matched = pollingStations.find(
+              (s) => s.name === colText || s.id === colText || colText.includes(s.name)
+            );
+
+            if (!matched) {
+              const numMatch = colText.match(/\d+/);
+              if (numMatch) {
+                const stNum = parseInt(numMatch[0]);
+                matched = pollingStations.find((s) => s.stationNumber === stNum);
+              }
+            }
+
+            stationCols.push({ colIdx: c, station: matched, rawName: colText });
+          }
+
+          if (stationCols.length === 0) {
+            throw new Error('ไม่สามารถระบุคอลัมน์หน่วยเลือกตั้งในตารางสรุป กกต. ได้');
+          }
+
+          const stationDataMap = new Map<
+            number,
+            {
+              station: (typeof pollingStations)[0] | undefined;
+              rawName: string;
+              candidateVotes: Record<string, number>;
+              invalidVotes: number;
+              noVotes: number;
+            }
+          >();
+
+          stationCols.forEach(({ colIdx, station, rawName }) => {
+            const initCandVotes: Record<string, number> = {};
+            candidates.forEach((cand) => (initCandVotes[cand.id] = 0));
+            stationDataMap.set(colIdx, {
+              station,
+              rawName,
+              candidateVotes: initCandVotes,
+              invalidVotes: 0,
+              noVotes: 0,
+            });
           });
 
-          // Fallback 0 for candidates not in columns
-          candidates.forEach((c) => {
-            if (candidateVotes[c.id] === undefined) {
-              candidateVotes[c.id] = 0;
+          for (let i = 0; i < rawLines.length; i++) {
+            const rowCells = parseRow(rawLines[i]);
+            if (rowCells.length < 3) continue;
+
+            const rowLabel = rowCells[0];
+
+            if (rowLabel.includes('2.2.2') || rowLabel.includes('บัตรเสีย')) {
+              stationCols.forEach(({ colIdx }) => {
+                const val = parseInt(rowCells[colIdx] || '0');
+                const data = stationDataMap.get(colIdx);
+                if (data) data.invalidVotes = isNaN(val) ? 0 : Math.max(0, val);
+              });
+            } else if (
+              rowLabel.includes('2.2.3') ||
+              rowLabel.includes('ไม่เลือกผู้ใด') ||
+              rowLabel.includes('ไม่ประสงค์')
+            ) {
+              stationCols.forEach(({ colIdx }) => {
+                const val = parseInt(rowCells[colIdx] || '0');
+                const data = stationDataMap.get(colIdx);
+                if (data) data.noVotes = isNaN(val) ? 0 : Math.max(0, val);
+              });
+            } else {
+              const matchedCandidate = candidates.find((cand) => {
+                const numStr = `${cand.number}`;
+                return (
+                  rowLabel.startsWith(`${numStr} `) ||
+                  rowLabel.startsWith(`เบอร์ ${numStr}`) ||
+                  rowLabel.startsWith(`หมายเลข ${numStr}`) ||
+                  rowLabel.includes(cand.name)
+                );
+              });
+
+              if (matchedCandidate) {
+                stationCols.forEach(({ colIdx }) => {
+                  const val = parseInt(rowCells[colIdx] || '0');
+                  const data = stationDataMap.get(colIdx);
+                  if (data)
+                    data.candidateVotes[matchedCandidate.id] = isNaN(val) ? 0 : Math.max(0, val);
+                });
+              }
+            }
+          }
+
+          stationDataMap.forEach(
+            ({ station, rawName, candidateVotes, invalidVotes, noVotes }) => {
+              parsedRows.push({
+                stationId: station ? station.id : `station_${rawName}`,
+                stationName: station ? station.name : rawName || 'หน่วยเลือกตั้ง',
+                candidateVotes,
+                invalidVotes,
+                noVotes,
+                officerName: 'นำเข้าผ่านไฟล์ตาราง กกต.',
+                isValidStation: !!station,
+              });
+            }
+          );
+        } else {
+          // --- STANDARD LIST FORMAT PARSING ---
+          const headers = parseRow(rawLines[0]);
+
+          const stationIdIdx = headers.findIndex(
+            (h) => h.includes('รหัสหน่วย') || h.toLowerCase().includes('stationid') || h.includes('id')
+          );
+          const stationNameIdx = headers.findIndex(
+            (h) => h.includes('ชื่อหน่วย') || h.includes('หน่วยเลือกตั้ง')
+          );
+          const invalidIdx = headers.findIndex((h) => h.includes('บัตรเสีย'));
+          const noVoteIdx = headers.findIndex((h) => h.includes('ไม่ประสงค์'));
+          const officerIdx = headers.findIndex(
+            (h) => h.includes('เจ้าหน้าที่') || h.includes('ผู้บันทึก')
+          );
+
+          const candidateColMap: { candidateId: string; colIdx: number }[] = [];
+          candidates.forEach((cand) => {
+            const colIdx = headers.findIndex(
+              (h) =>
+                h.includes(`เบอร์_${cand.number}_`) ||
+                h.includes(`เบอร์ ${cand.number}`) ||
+                h.includes(`หมายเลข ${cand.number}`) ||
+                h.includes(`เบอร์_${cand.number}`) ||
+                h.includes(`candidate_${cand.number}`)
+            );
+            if (colIdx !== -1) {
+              candidateColMap.push({ candidateId: cand.id, colIdx });
             }
           });
 
-          const invalidVotes = invalidIdx !== -1 ? Math.max(0, parseInt(cells[invalidIdx]) || 0) : 0;
-          const noVotes = noVoteIdx !== -1 ? Math.max(0, parseInt(cells[noVoteIdx]) || 0) : 0;
-          const officerName =
-            officerIdx !== -1 && cells[officerIdx] ? cells[officerIdx] : 'นำเข้าผ่าน Excel';
+          for (let i = 1; i < rawLines.length; i++) {
+            const cells = parseRow(rawLines[i]);
+            if (cells.length === 0 || !cells.some((c) => c !== '')) continue;
 
-          parsedRows.push({
-            stationId: matchedStation ? matchedStation.id : rawStationId || `station_${i}`,
-            stationName: matchedStation ? matchedStation.name : rawStationName || `หน่วยเลือกตั้งที่ ${i}`,
-            candidateVotes,
-            invalidVotes,
-            noVotes,
-            officerName,
-            isValidStation: !!matchedStation,
-          });
+            const rawStationId = stationIdIdx !== -1 ? cells[stationIdIdx] : '';
+            const rawStationName = stationNameIdx !== -1 ? cells[stationNameIdx] : '';
+
+            let matchedStation = pollingStations.find(
+              (s) => s.id === rawStationId || s.name === rawStationName || s.name.includes(rawStationName)
+            );
+
+            if (!matchedStation && rawStationName) {
+              const numMatch = rawStationName.match(/\d+/);
+              if (numMatch) {
+                const stNum = parseInt(numMatch[0]);
+                matchedStation = pollingStations.find((s) => s.stationNumber === stNum);
+              }
+            }
+
+            const candidateVotes: Record<string, number> = {};
+            candidateColMap.forEach(({ candidateId, colIdx }) => {
+              const val = parseInt(cells[colIdx] || '0');
+              candidateVotes[candidateId] = isNaN(val) ? 0 : Math.max(0, val);
+            });
+
+            candidates.forEach((c) => {
+              if (candidateVotes[c.id] === undefined) {
+                candidateVotes[c.id] = 0;
+              }
+            });
+
+            const invalidVotes = invalidIdx !== -1 ? Math.max(0, parseInt(cells[invalidIdx]) || 0) : 0;
+            const noVotes = noVoteIdx !== -1 ? Math.max(0, parseInt(cells[noVoteIdx]) || 0) : 0;
+            const officerName =
+              officerIdx !== -1 && cells[officerIdx] ? cells[officerIdx] : 'นำเข้าผ่าน Excel';
+
+            parsedRows.push({
+              stationId: matchedStation ? matchedStation.id : rawStationId || `station_${i}`,
+              stationName: matchedStation ? matchedStation.name : rawStationName || `หน่วยเลือกตั้งที่ ${i}`,
+              candidateVotes,
+              invalidVotes,
+              noVotes,
+              officerName,
+              isValidStation: !!matchedStation,
+            });
+          }
         }
 
         if (parsedRows.length === 0) {
@@ -398,15 +746,28 @@ export const VoteEntryPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Download Template Button */}
-          <button
-            type="button"
-            onClick={handleDownloadTemplate}
-            className="w-full md:w-auto px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs rounded-2xl shadow-lg shadow-amber-400/20 flex items-center justify-center space-x-2 transition-all cursor-pointer active:scale-95 shrink-0"
-          >
-            <Download className="w-4 h-4 text-slate-950" />
-            <span>ดาวน์โหลดแบบฟอร์ม Excel (Template)</span>
-          </button>
+          {/* Download Template Buttons */}
+          <div className="flex flex-col sm:flex-row items-center gap-2 w-full md:w-auto shrink-0">
+            <button
+              type="button"
+              onClick={handleDownloadMatrixTemplate}
+              className="w-full sm:w-auto px-3.5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs rounded-2xl shadow-lg shadow-amber-400/20 flex items-center justify-center space-x-1.5 transition-all cursor-pointer active:scale-95 shrink-0"
+              title="ดาวน์โหลดตาราง กกต. แบบ Matrix ตามแบบฉบับมาตรฐาน"
+            >
+              <Download className="w-4 h-4 text-slate-950" />
+              <span>แบบฟอร์มตารางสรุป กกต. (Matrix)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadStandardTemplate}
+              className="w-full sm:w-auto px-3.5 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-emerald-100 font-bold text-xs rounded-2xl border border-emerald-600 flex items-center justify-center space-x-1.5 transition-all cursor-pointer active:scale-95 shrink-0"
+              title="ดาวน์โหลดตารางแบบรายแถวต่อหน่วยเลือกตั้ง"
+            >
+              <Download className="w-4 h-4 text-emerald-300" />
+              <span>แบบฟอร์มรายหน่วย (List)</span>
+            </button>
+          </div>
         </div>
 
         {/* Upload File Zone */}
@@ -446,6 +807,7 @@ export const VoteEntryPage: React.FC = () => {
             <ul className="text-[11px] text-emerald-200/90 space-y-0.5 list-disc list-inside">
               <li>ใช้ไฟล์ที่ดาวน์โหลดจากปุ่ม Template ด้านบน</li>
               <li>กรอกคะแนนบัตรดี, บัตรเสีย, ไม่ประสงค์ลงคะแนน</li>
+              <li><b>นำเข้าหลายรอบ:</b> ให้กรอกเป็น <b>"คะแนนรวมทั้งหมดล่าสุด"</b> ของหน่วยนั้นๆ (ระบบจะอัปเดตเป็นคะแนนล่าสุดในไฟล์)</li>
               <li>ระบบจะทำการตรวจสอบและพรีวิวข้อมูลก่อนยืนยัน</li>
             </ul>
           </div>
@@ -483,49 +845,19 @@ export const VoteEntryPage: React.FC = () => {
           <span>ขั้นตอนที่ 1: เลือกสถานที่หน่วยเลือกตั้งที่จะกรอกคะแนน</span>
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* District Select */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* 1. Zone Select (เขตเลือกตั้ง) */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">อำเภอ:</label>
-            <select
-              value={selectedDistrictId}
-              onChange={(e) => {
-                const dId = e.target.value;
-                setSelectedDistrictId(dId);
-                const matchingZones = zones.filter((z) => z.districtId === dId);
-                if (matchingZones.length > 0) {
-                  setSelectedZoneId(matchingZones[0].id);
-                  const matchingStations = pollingStations.filter(
-                    (s) => s.districtId === dId && s.zoneId === matchingZones[0].id
-                  );
-                  if (matchingStations.length > 0) setSelectedStationId(matchingStations[0].id);
-                }
-              }}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              {districts.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Zone Select */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">เขตเลือกตั้ง:</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">1. เขตเลือกตั้ง:</label>
             <select
               value={selectedZoneId}
               onChange={(e) => {
-                const zId = e.target.value;
-                setSelectedZoneId(zId);
-                const matchingStations = pollingStations.filter(
-                  (s) => s.districtId === selectedDistrictId && s.zoneId === zId
-                );
-                if (matchingStations.length > 0) setSelectedStationId(matchingStations[0].id);
+                setSelectedZoneId(e.target.value);
+                setSelectedSubDistrictId('all');
               }}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
+              <option value="all">ทุกเขตเลือกตั้ง ({availableZones.length} เขต)</option>
               {availableZones.map((z) => (
                 <option key={z.id} value={z.id}>
                   {z.name}
@@ -534,19 +866,68 @@ export const VoteEntryPage: React.FC = () => {
             </select>
           </div>
 
-          {/* Station Select */}
+          {/* 2. District Select (อำเภอ) */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">หน่วยเลือกตั้ง:</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">2. อำเภอ:</label>
+            <select
+              value={selectedDistrictId}
+              onChange={(e) => {
+                const dId = e.target.value;
+                setSelectedDistrictId(dId);
+                setSelectedSubDistrictId('all');
+              }}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="all">ทุกอำเภอ ({availableDistricts.length} อำเภอ)</option>
+              {availableDistricts.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 3. SubDistrict Select (ตำบล) */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">3. ตำบล:</label>
+            <select
+              value={selectedSubDistrictId}
+              onChange={(e) => {
+                setSelectedSubDistrictId(e.target.value);
+              }}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option key="all" value="all">
+                ทุกตำบล ({availableSubDistricts.length} ตำบล)
+              </option>
+              {availableSubDistricts.map((sd) => (
+                <option key={sd.id} value={sd.id}>
+                  {sd.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 4. Station Select (หน่วยเลือกตั้ง) */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">4. หน่วยเลือกตั้ง:</label>
             <select
               value={selectedStationId}
               onChange={(e) => setSelectedStationId(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-indigo-900 border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
-              {availableStations.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} ({s.status === 'completed' ? 'นับเสร็จแล้ว' : 'ยังนับไม่เสร็จ'})
-                </option>
-              ))}
+              {availableStations.length === 0 ? (
+                <option value="">-- ไม่พบหน่วยเลือกตั้งในตำบลนี้ --</option>
+              ) : (
+                availableStations.map((s) => {
+                  const subName = subDistricts.find((sd) => sd.id === s.subDistrictId)?.name;
+                  return (
+                    <option key={s.id} value={s.id}>
+                      {s.name}{selectedSubDistrictId === 'all' && subName ? ` (${subName})` : ''} ({s.status === 'completed' ? '✓ นับเสร็จแล้ว' : 'กำลังนับ'})
+                    </option>
+                  );
+                })
+              )}
             </select>
           </div>
         </div>
@@ -572,7 +953,7 @@ export const VoteEntryPage: React.FC = () => {
                     <div className="text-slate-600 mt-0.5">
                       จำนวนผู้มีสิทธิเลือกตั้งในหน่วยนี้:{' '}
                       <span className="font-bold text-indigo-900">
-                        {activeStation.totalEligibleVoters.toLocaleString()} คน
+                        {(activeStation?.totalEligibleVoters ?? 0).toLocaleString()} คน
                       </span>
                     </div>
                   </div>
@@ -679,7 +1060,7 @@ export const VoteEntryPage: React.FC = () => {
                 <span>1. บัตรดี (ระบุคะแนนแยกรายหมายเลขผู้สมัคร)</span>
               </span>
               <span className="text-xs font-black text-emerald-800">
-                รวมบัตรดี: {totalValidVotes.toLocaleString()} คะแนน
+                รวมบัตรดี: {(totalValidVotes ?? 0).toLocaleString()} คะแนน
               </span>
             </div>
 
@@ -813,7 +1194,7 @@ export const VoteEntryPage: React.FC = () => {
               <div>
                 <div className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-full bg-slate-500" />
-                  <span>3. ไม่ประสงค์ลงคะแนน:</span>
+                  <span>3. บัตรไม่เลือกผู้ใด:</span>
                 </div>
                 <div className="text-[11px] text-slate-600 mt-0.5">บัตรทำเครื่องหมายกากบาทไม่เลือกผู้ใด</div>
               </div>
@@ -850,25 +1231,25 @@ export const VoteEntryPage: React.FC = () => {
             <div>
               <div className="text-xs text-slate-400 font-medium">สรุปยอดคะแนนของหน่วยนี้</div>
               <div className="text-2xl font-black text-white mt-0.5">
-                รวมบัตรทุกประเภท: {totalVotesThisStation.toLocaleString()}{' '}
+                รวมบัตรทุกประเภท: {(totalVotesThisStation ?? 0).toLocaleString()}{' '}
                 <span className="text-xs font-normal text-slate-400">ใบ/เสียง</span>
               </div>
               <div className="flex flex-wrap gap-2 text-xs mt-2">
                 <span className="bg-emerald-950 text-emerald-300 px-2.5 py-0.5 rounded-md border border-emerald-800/80 font-bold">
-                  1. บัตรดี: {totalValidVotes.toLocaleString()}
+                  1. บัตรดี: {(totalValidVotes ?? 0).toLocaleString()}
                 </span>
                 <span className="bg-rose-950 text-rose-300 px-2.5 py-0.5 rounded-md border border-rose-800/80 font-bold">
-                  2. บัตรเสีย: {invalidVotes.toLocaleString()}
+                  2. บัตรเสีย: {(invalidVotes ?? 0).toLocaleString()}
                 </span>
                 <span className="bg-slate-800 text-slate-300 px-2.5 py-0.5 rounded-md border border-slate-700 font-bold">
-                  3. ไม่ลงคะแนน: {noVotes.toLocaleString()}
+                  3. ไม่ลงคะแนน: {(noVotes ?? 0).toLocaleString()}
                 </span>
               </div>
             </div>
 
             <div className="text-right text-xs">
               <div className="text-slate-300">
-                ผู้มีสิทธิ: <span className="font-bold text-white">{eligibleVoters.toLocaleString()} คน</span>
+                ผู้มีสิทธิ: <span className="font-bold text-white">{(eligibleVoters ?? 0).toLocaleString()} คน</span>
               </div>
               {isOverEligibleLimit && (
                 <div className="text-red-400 font-bold flex items-center gap-1 mt-1">
@@ -966,7 +1347,7 @@ export const VoteEntryPage: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {parsedImportData.map((row, idx) => {
-                        const totalCand = (Object.values(row.candidateVotes) as number[]).reduce(
+                        const totalCand = (Object.values(row.candidateVotes || {}) as number[]).reduce(
                           (a, b) => a + b,
                           0
                         );
@@ -986,16 +1367,16 @@ export const VoteEntryPage: React.FC = () => {
                               </div>
                             </td>
                             <td className="p-3 text-center font-bold text-emerald-700">
-                              {totalCand.toLocaleString()}
+                              {(totalCand ?? 0).toLocaleString()}
                             </td>
                             <td className="p-3 text-center font-bold text-rose-600">
-                              {row.invalidVotes.toLocaleString()}
+                              {(row.invalidVotes ?? 0).toLocaleString()}
                             </td>
                             <td className="p-3 text-center font-bold text-slate-600">
-                              {row.noVotes.toLocaleString()}
+                              {(row.noVotes ?? 0).toLocaleString()}
                             </td>
                             <td className="p-3 text-center font-black text-slate-900">
-                              {totalRow.toLocaleString()}
+                              {(totalRow ?? 0).toLocaleString()}
                             </td>
                             <td className="p-3 text-center">
                               {row.isValidStation ? (
