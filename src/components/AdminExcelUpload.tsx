@@ -6,7 +6,7 @@ interface AdminExcelUploadProps {
 }
 
 // ดึง API URL จากไฟล์ .env หรือ Environment Variable ของ Render
-const API_URL = (import.meta as any).env?.VITE_API_URL || '';
+const API_URL = "https://script.google.com/macros/s/AKfycby0jj12DRFqG-oEmanlzj5m4JxsMd3ltLqAle6W9SdYsrr--dHjxDZHwJTAxlQEH8RDCQ/exec";
 
 export const AdminExcelUpload: React.FC<AdminExcelUploadProps> = ({ onSuccess }) => {
   const [loading, setLoading] = useState<boolean>(false);
