@@ -35,7 +35,6 @@ export const AdminExcelUpload: React.FC<AdminExcelUploadProps> = ({ onSuccess })
           return;
         }
 
-        // 1. จัดแปลงโครงสร้างข้อมูลสำหรับ Google Sheets
         const unitsData = jsonData.map((row: any, index: number) => ({
           id: row.id || row.ID || (index + 1),
           zone: row.zone || row['เขต'] || row['เขตเลือกตั้ง'] || '',
@@ -47,12 +46,11 @@ export const AdminExcelUpload: React.FC<AdminExcelUploadProps> = ({ onSuccess })
 
         setStatusMessage(`กำลังส่งข้อมูล ${unitsData.length} รายการ ลง Google Sheets...`);
 
-        // 2. 🚀 ยิง POST ไป Google Apps Script โดยใช้ mode: 'no-cors' เพื่อทะลวงผ่าน CORS
-        await fetch(API_URL, {
+        // 🚀 ยิง POST ไป Google Apps Script (เอา no-cors ออกแล้ว)
+        const response = await fetch(API_URL, {
           method: 'POST',
-          mode: 'no-cors', // 💡 จุดสำคัญ: ป้องกันเบราว์เซอร์บล็อก Redirect ของ Google
           headers: {
-            'Content-Type': 'text/plain',
+            'Content-Type': 'text/plain;charset=utf-8',
           },
           body: JSON.stringify({
             action: 'batch_add_units',
@@ -60,20 +58,26 @@ export const AdminExcelUpload: React.FC<AdminExcelUploadProps> = ({ onSuccess })
           }),
         });
 
-        // 3. อัปเดตข้อมูลบนหน้าเว็บ React
-        if (onSuccess) {
-          await onSuccess(jsonData);
-        }
+        // รับคำตอบกลับจาก Google
+        const result = await response.json();
 
-        alert(`✅ ส่งข้อมูลเข้า Google Sheets สำเร็จ (${unitsData.length} รายการ)`);
+        if (result.status === 'success') {
+          if (onSuccess) {
+            await onSuccess(jsonData);
+          }
+          alert(`✅ ส่งข้อมูลเข้า Google Sheets สำเร็จ (${result.imported_count} รายการ)`);
+        } else {
+          // ถ้าฝั่ง Google มี Error จะมาเข้าตรงนี้
+          alert(`❌ เกิดข้อผิดพลาดจากฝั่ง Google: ${result.message}`);
+        }
 
       } catch (err: any) {
         console.error("Upload error:", err);
-        alert(`❌ เกิดข้อผิดพลาด: ${err.message || err}`);
+        alert(`❌ ไม่สามารถเชื่อมต่อกับ Google Sheets ได้: ${err.message || err}`);
       } finally {
         setLoading(false);
         setStatusMessage('');
-        event.target.value = '';
+        event.target.value = ''; // เคลียร์ไฟล์
       }
     };
 
