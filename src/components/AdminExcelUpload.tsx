@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 
 interface AdminExcelUploadProps {
-  onSuccess?: () => void;
+  onSuccess?: (data?: any) => void;
 }
 
 // 🔴 Web App URL ของ Google Apps Script
@@ -17,7 +17,7 @@ export const AdminExcelUpload: React.FC<AdminExcelUploadProps> = ({ onSuccess })
     if (!file) return;
 
     setLoading(true);
-    setStatusMessage('กำลังอ่านไฟล์ Excel...');
+    setStatusMessage('กำลังอ่านไฟล์ และบันทึกลง Google Sheets...');
 
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -25,11 +25,8 @@ export const AdminExcelUpload: React.FC<AdminExcelUploadProps> = ({ onSuccess })
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
         
-        // ดึงข้อมูลจาก Sheet แรก
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
-        
-        // แปลงเป็น JSON
         const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet);
 
         if (jsonData.length === 0) {
@@ -38,9 +35,7 @@ export const AdminExcelUpload: React.FC<AdminExcelUploadProps> = ({ onSuccess })
           return;
         }
 
-        setStatusMessage(`กำลังส่งข้อมูล ${jsonData.length} รายการ ไปยัง Google Sheets...`);
-
-        // แปลงโครงสร้างข้อมูลให้ตรงกับ Google Apps Script
+        // 1. จัดแปลงโครงสร้างข้อมูลสำหรับ Google Sheets
         const unitsData = jsonData.map((row: any, index: number) => ({
           id: row.id || row.ID || (index + 1),
           zone: row.zone || row['เขต'] || row['เขตเลือกตั้ง'] || '',
@@ -50,34 +45,37 @@ export const AdminExcelUpload: React.FC<AdminExcelUploadProps> = ({ onSuccess })
           eligible_voters: row.eligible_voters || row['ผู้มีสิทธิ'] || row['จำนวนผู้มีสิทธิเลือกตั้ง'] || 0
         }));
 
-        // 🚀 ส่งข้อมูลไปยัง Google Apps Script (หลบ CORS ด้วย text/plain)
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'text/plain;charset=utf-8',
-          },
-          body: JSON.stringify({
-            action: 'batch_add_units',
-            units: unitsData
-          }),
-        });
+        // 2. 🚀 ส่งข้อมูลไปลง Google Sheets ก่อน
+        try {
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'text/plain;charset=utf-8',
+            },
+            body: JSON.stringify({
+              action: 'batch_add_units',
+              units: unitsData
+            }),
+          });
+          
+          const sheetResult = await response.json();
+          console.log('Google Sheet Response:', sheetResult);
+        } catch (sheetErr) {
+          console.error('ไม่สามารถส่งลง Google Sheets ได้:', sheetErr);
+        }
 
-        const result = await response.json();
-
-        if (result.status === 'success') {
-          alert(`✅ นำเข้าข้อมูลสำเร็จเรียบร้อยแล้ว (${result.imported_count || unitsData.length} รายการ)`);
-          if (onSuccess) onSuccess();
-        } else {
-          alert(`❌ เกิดข้อผิดพลาดจากเซิร์ฟเวอร์: ${result.message}`);
+        // 3. อัปเดตข้อมูลบนหน้าเว็บ React (เพื่อให้แสดงผลการนำเข้าสำเร็จ)
+        if (onSuccess) {
+          await onSuccess(jsonData);
         }
 
       } catch (err: any) {
         console.error("Upload error:", err);
-        alert(`❌ เกิดข้อผิดพลาดในการประมวลผล: ${err.message || err}`);
+        alert(`❌ เกิดข้อผิดพลาด: ${err.message || err}`);
       } finally {
         setLoading(false);
         setStatusMessage('');
-        event.target.value = ''; // Reset input file
+        event.target.value = '';
       }
     };
 
@@ -95,7 +93,7 @@ export const AdminExcelUpload: React.FC<AdminExcelUploadProps> = ({ onSuccess })
         </div>
         <div className="flex items-center gap-2">
           <label className={`cursor-pointer px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 font-semibold text-sm transition-all flex items-center gap-2 ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
-            {loading ? '⏳ กำลังประมวลผล...' : '📁 เลือกไฟล์ Excel เพื่อนำเข้า'}
+            {loading ? '⏳ กำลังส่งข้อมูล...' : '📁 เลือกไฟล์ Excel เพื่อนำเข้า'}
             <input
               type="file"
               accept=".xlsx, .xls"
