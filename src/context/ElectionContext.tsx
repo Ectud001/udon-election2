@@ -24,6 +24,26 @@ import {
 
 const LOCAL_STORAGE_KEY = 'thai_election_realtime_v2';
 
+const GOOGLE_APPS_SCRIPT_URL = import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL?.trim();
+
+const syncExcelImportToGoogleSheets = (payload: {
+  pollingStations: PollingStation[];
+  districts: District[];
+  subDistricts: SubDistrict[];
+  zones: Zone[];
+}) => {
+  if (!GOOGLE_APPS_SCRIPT_URL) return;
+
+  fetch(GOOGLE_APPS_SCRIPT_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'replacePollingStations', ...payload }),
+  }).catch((error) => {
+    console.error('Failed to sync Excel import to Google Sheets', error);
+  });
+};
+
 interface ElectionContextType {
   electionTitle: string;
   setElectionTitle: (title: string) => void;
@@ -813,6 +833,12 @@ export const ElectionProvider: React.FC<{ children: ReactNode }> = ({ children }
     setPollingStations(currentStations);
 
     saveToLocalStorage({
+      districts: currentDistricts,
+      subDistricts: currentSubDistricts,
+      zones: currentZones,
+      pollingStations: currentStations,
+    });
+    syncExcelImportToGoogleSheets({
       districts: currentDistricts,
       subDistricts: currentSubDistricts,
       zones: currentZones,
