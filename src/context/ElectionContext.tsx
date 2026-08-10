@@ -23,26 +23,46 @@ import {
 } from '../mockData';
 
 const LOCAL_STORAGE_KEY = 'thai_election_realtime_v2';
-
 const GOOGLE_APPS_SCRIPT_URL = import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL?.trim();
 
-const syncExcelImportToGoogleSheets = (payload: {
-  pollingStations: PollingStation[];
-  districts: District[];
-  subDistricts: SubDistrict[];
-  zones: Zone[];
-}) => {
+const syncToGoogleSheets = (data: unknown) => {
   if (!GOOGLE_APPS_SCRIPT_URL) return;
-
   fetch(GOOGLE_APPS_SCRIPT_URL, {
     method: 'POST',
     mode: 'no-cors',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: 'replacePollingStations', ...payload }),
-  }).catch((error) => {
-    console.error('Failed to sync Excel import to Google Sheets', error);
-  });
+    body: JSON.stringify({ action: 'saveState', data }),
+  }).catch((error) => console.error('Failed to sync election data to Google Sheets', error));
 };
+
+const loadFromGoogleSheets = () => new Promise<any>((resolve, reject) => {
+  if (!GOOGLE_APPS_SCRIPT_URL) {
+    resolve(null);
+    return;
+  }
+  const callbackName = '__electionGoogleSheets_' + Date.now();
+  const script = document.createElement('script');
+  const cleanUp = () => {
+    delete (window as any)[callbackName];
+    script.remove();
+  };
+  const timeout = window.setTimeout(() => {
+    cleanUp();
+    reject(new Error('Google Sheets request timed out'));
+  }, 10000);
+  (window as any)[callbackName] = (response: any) => {
+    window.clearTimeout(timeout);
+    cleanUp();
+    resolve(response?.data ?? null);
+  };
+  script.onerror = () => {
+    window.clearTimeout(timeout);
+    cleanUp();
+    reject(new Error('Unable to load Google Sheets data'));
+  };
+  script.src = GOOGLE_APPS_SCRIPT_URL + (GOOGLE_APPS_SCRIPT_URL.includes('?') ? '&' : '?') + 'callback=' + callbackName;
+  document.head.appendChild(script);
+});
 
 interface ElectionContextType {
   electionTitle: string;
@@ -175,6 +195,17 @@ export const ElectionProvider: React.FC<{ children: ReactNode }> = ({ children }
     } catch (e) {
       console.error('Failed to load election data from localStorage', e);
     }
+    void loadFromGoogleSheets().then((remote) => {
+      if (!remote) return;
+      if (remote.electionTitle) setElectionTitle(remote.electionTitle);
+      if (Array.isArray(remote.candidates)) setCandidates(remote.candidates);
+      if (Array.isArray(remote.districts)) setDistricts(remote.districts);
+      if (Array.isArray(remote.subDistricts)) setSubDistricts(remote.subDistricts);
+      if (Array.isArray(remote.zones)) setZones(remote.zones);
+      if (Array.isArray(remote.pollingStations)) setPollingStations(remote.pollingStations);
+      if (Array.isArray(remote.parties)) setParties(remote.parties);
+      if (Array.isArray(remote.votes)) setVotes(remote.votes);
+    }).catch((error) => console.error('Failed to load election data from Google Sheets', error));
   }, []);
 
   // Save to local storage
@@ -190,9 +221,7 @@ export const ElectionProvider: React.FC<{ children: ReactNode }> = ({ children }
       electionTitle?: string;
     } = {}) => {
       try {
-        localStorage.setItem(
-          LOCAL_STORAGE_KEY,
-          JSON.stringify({
+        const snapshot = {
             electionTitle: data.electionTitle !== undefined ? data.electionTitle : electionTitle,
             candidates: data.candidates !== undefined ? data.candidates : candidates,
             districts: data.districts !== undefined ? data.districts : districts,
@@ -201,8 +230,9 @@ export const ElectionProvider: React.FC<{ children: ReactNode }> = ({ children }
             pollingStations: data.pollingStations !== undefined ? data.pollingStations : pollingStations,
             votes: data.votes !== undefined ? data.votes : votes,
             parties: data.parties !== undefined ? data.parties : parties,
-          })
-        );
+        };
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(snapshot));
+        syncToGoogleSheets(snapshot);
       } catch (e) {
         console.error('Failed to save election data to localStorage', e);
       }
@@ -833,12 +863,6 @@ export const ElectionProvider: React.FC<{ children: ReactNode }> = ({ children }
     setPollingStations(currentStations);
 
     saveToLocalStorage({
-      districts: currentDistricts,
-      subDistricts: currentSubDistricts,
-      zones: currentZones,
-      pollingStations: currentStations,
-    });
-    syncExcelImportToGoogleSheets({
       districts: currentDistricts,
       subDistricts: currentSubDistricts,
       zones: currentZones,
